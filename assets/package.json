@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "headless-vpl": "^0.3.0"
+  }
+}
