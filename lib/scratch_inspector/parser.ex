@@ -169,7 +169,13 @@ defmodule ScratchInspector.Parser do
 
       block when is_map(block) ->
         opcode = Map.get(block, "opcode", "")
-        label = opcode_label(opcode)
+        label =
+          if opcode == "procedures_call" do
+            proccode = block |> Map.get("mutation", %{}) |> Map.get("proccode", "?")
+            "📞 #{proccode}"
+          else
+            opcode_label(opcode)
+          end
         inputs = Map.get(block, "inputs", %{})
         fields = Map.get(block, "fields", %{})
 
@@ -230,23 +236,39 @@ defmodule ScratchInspector.Parser do
       inputs
       |> Enum.reject(fn {key, _} -> String.starts_with?(key, "SUBSTACK") || key == "custom_block" end)
       |> Enum.flat_map(fn {_key, val} ->
+        # Scratch input encoding:
+        #   [shadow, second]          — shadow=1/2: literal or reporter (no fallback)
+        #   [shadow, second, fallback] — shadow=3: reporter/inline-var with shadow fallback
         case val do
-          [_, [literal_type, value | _]] when is_integer(literal_type) and is_binary(value) ->
-            [value]
-
-          [_, id] when is_binary(id) ->
-            # reporter ブロックの場合
-            case Map.get(blocks, id) do
-              %{"opcode" => opc} -> [opcode_label(opc)]
-              _ -> []
-            end
-
-          _ ->
-            []
+          [_, second] -> extract_input_value(second, blocks)
+          [_, second, _fallback] -> extract_input_value(second, blocks)
+          _ -> []
         end
       end)
 
     field_params ++ input_params
+  end
+
+  # プリミティブ値: [type, value, ...] — type 4-11: number/string literal, 12-13: inline variable/list
+  defp extract_input_value([_type, value | _], _blocks) when is_binary(value), do: [value]
+  defp extract_input_value([_type, value | _], _blocks) when is_number(value), do: [to_string(value)]
+  # reporter ブロック参照: "block_id"
+  defp extract_input_value(id, blocks) when is_binary(id), do: [reporter_label(Map.get(blocks, id), blocks)]
+  defp extract_input_value(_, _), do: []
+
+  defp reporter_label(nil, _blocks), do: "?"
+  defp reporter_label(block, blocks) do
+    case Map.get(block, "opcode") do
+      "data_variable" ->
+        block |> Map.get("fields", %{}) |> Map.get("VARIABLE", []) |> List.first() || "?"
+      "data_listcontents" ->
+        block |> Map.get("fields", %{}) |> Map.get("LIST", []) |> List.first() || "?"
+      opc ->
+        inputs = Map.get(block, "inputs", %{})
+        fields = Map.get(block, "fields", %{})
+        inner = extract_block_params(inputs, fields, blocks)
+        if Enum.empty?(inner), do: opcode_label(opc), else: "#{opcode_label(opc)}(#{Enum.join(inner, ", ")})"
+    end
   end
 
   # ---- top-level scripts (non-function code) ----
@@ -439,23 +461,26 @@ defmodule ScratchInspector.Parser do
 
   defp do_extract_variables(target, scope, all_targets) do
     vars = Map.get(target, "variables", %{})
+    lists = Map.get(target, "lists", %{})
     sprite_name = Map.get(target, "name")
 
-    vars
-    |> Enum.map(fn {_id, [name | _]} ->
-      {readers, writers} = find_variable_refs(name, all_targets)
+    var_entries =
+      vars
+      |> Enum.map(fn {_id, [name | _]} ->
+        {readers, writers} = find_variable_refs(name, all_targets)
+        %{name: name, kind: :variable, scope: scope, sprite: sprite_name, readers: readers, writers: writers}
+      end)
+      |> Enum.filter(fn v -> Enum.any?(v.readers) or Enum.any?(v.writers) end)
 
-      %{
-        name: name,
-        scope: scope,
-        sprite: sprite_name,
-        readers: readers,
-        writers: writers
-      }
-    end)
-    |> Enum.filter(fn var ->
-      Enum.any?(var.readers) or Enum.any?(var.writers)
-    end)
+    list_entries =
+      lists
+      |> Enum.map(fn {_id, [name | _]} ->
+        {readers, writers} = find_list_refs(name, all_targets)
+        %{name: name, kind: :list, scope: scope, sprite: sprite_name, readers: readers, writers: writers}
+      end)
+      |> Enum.filter(fn v -> Enum.any?(v.readers) or Enum.any?(v.writers) end)
+
+    var_entries ++ list_entries
   end
 
   defp find_variable_refs(var_name, targets) do
@@ -486,6 +511,45 @@ defmodule ScratchInspector.Parser do
           is_map(block) and
             Map.get(block, "opcode") in ["data_setvariableto", "data_changevariableby"] and
             block |> Map.get("fields", %{}) |> Map.get("VARIABLE", []) |> List.first() == var_name
+        end)
+        |> Enum.map(fn _ -> sprite_name end)
+      end)
+      |> Enum.uniq()
+
+    {readers, writers}
+  end
+
+  defp find_list_refs(list_name, targets) do
+    reader_opcodes = ~w(data_listcontents data_itemnumoflist data_itemoflist data_lengthoflist data_listcontainsitem)
+    writer_opcodes = ~w(data_addtolist data_deleteoflist data_deletealloflist data_insertatlist data_replaceitemoflist)
+
+    readers =
+      targets
+      |> Enum.flat_map(fn t ->
+        sprite_name = Map.get(t, "name", "?")
+        blocks = Map.get(t, "blocks", %{})
+
+        blocks
+        |> Enum.filter(fn {_id, block} ->
+          is_map(block) and
+            Map.get(block, "opcode") in reader_opcodes and
+            block |> Map.get("fields", %{}) |> Map.get("LIST", []) |> List.first() == list_name
+        end)
+        |> Enum.map(fn _ -> sprite_name end)
+      end)
+      |> Enum.uniq()
+
+    writers =
+      targets
+      |> Enum.flat_map(fn t ->
+        sprite_name = Map.get(t, "name", "?")
+        blocks = Map.get(t, "blocks", %{})
+
+        blocks
+        |> Enum.filter(fn {_id, block} ->
+          is_map(block) and
+            Map.get(block, "opcode") in writer_opcodes and
+            block |> Map.get("fields", %{}) |> Map.get("LIST", []) |> List.first() == list_name
         end)
         |> Enum.map(fn _ -> sprite_name end)
       end)

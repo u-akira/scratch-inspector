@@ -7,14 +7,13 @@ defmodule ScratchInspectorWeb.InspectorLive do
       socket
       |> assign(:page_title, "Scratch Inspector")
       |> assign(:project, nil)
-      |> assign(:active_tab, :code)
+      |> assign(:active_tab, :flow)
       |> assign(:selected_sprite, nil)
       |> assign(:selected_target_type, nil)
       |> assign(:upload_error, nil)
       |> assign(:processing, false)
-      |> assign(:expanded_functions, MapSet.new())
-      |> assign(:expanded_scripts, MapSet.new())
       |> assign(:show_sprite_code, false)
+      |> assign(:flow_detail, nil)
       |> allow_upload(:scratch_file,
         accept: :any,
         max_entries: 1,
@@ -41,9 +40,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
      socket
      |> assign(:selected_sprite, name)
      |> assign(:selected_target_type, type)
-     |> assign(:expanded_functions, MapSet.new())
-     |> assign(:expanded_scripts, MapSet.new())
-     |> assign(:show_sprite_code, false)}
+     |> assign(:show_sprite_code, false)
+     |> assign(:flow_detail, nil)}
   end
 
   @impl true
@@ -52,32 +50,18 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   @impl true
-  def handle_event("toggle_function", %{"name" => name}, socket) do
-    expanded = socket.assigns.expanded_functions
-
-    expanded =
-      if MapSet.member?(expanded, name),
-        do: MapSet.delete(expanded, name),
-        else: MapSet.put(expanded, name)
-
-    {:noreply, assign(socket, :expanded_functions, expanded)}
-  end
-
-  @impl true
-  def handle_event("toggle_script", %{"id" => id}, socket) do
-    expanded = socket.assigns.expanded_scripts
-
-    expanded =
-      if MapSet.member?(expanded, id),
-        do: MapSet.delete(expanded, id),
-        else: MapSet.put(expanded, id)
-
-    {:noreply, assign(socket, :expanded_scripts, expanded)}
-  end
-
-  @impl true
   def handle_event("toggle_sprite_code", _params, socket) do
     {:noreply, assign(socket, :show_sprite_code, !socket.assigns.show_sprite_code)}
+  end
+
+  @impl true
+  def handle_event("flow_select_detail", %{"kind" => kind, "id" => id}, socket) do
+    current = socket.assigns.flow_detail
+    next =
+      if current && current.kind == kind && current.id == id,
+        do: nil,
+        else: %{kind: kind, id: id}
+    {:noreply, assign(socket, :flow_detail, next)}
   end
 
   @impl true
@@ -88,11 +72,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
      |> assign(:selected_sprite, nil)
      |> assign(:selected_target_type, nil)
      |> assign(:upload_error, nil)
-     |> assign(:active_tab, :events)
+     |> assign(:active_tab, :flow)
      |> assign(:processing, false)
-     |> assign(:expanded_functions, MapSet.new())
-     |> assign(:expanded_scripts, MapSet.new())
-     |> assign(:show_sprite_code, false)}
+     |> assign(:show_sprite_code, false)
+     |> assign(:flow_detail, nil)}
   end
 
   defp do_process_upload(socket) do
@@ -244,116 +227,78 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
       <!-- Main UI -->
       <% else %>
-        <div class="flex h-[calc(100vh-56px)]">
-          <!-- Sidebar -->
-          <aside class="w-56 bg-white border-r border-gray-200 overflow-y-auto flex-shrink-0">
-            <!-- Stage section -->
+        <div class="h-[calc(100vh-56px)] flex flex-col overflow-hidden">
+          <!-- Sprite thumbnail strip -->
+          <div class="bg-white border-b border-gray-200 flex gap-1 px-3 py-2 overflow-x-auto flex-shrink-0">
             <%= if @project.stage do %>
-              <div class="px-3 py-2 border-b border-gray-100">
-                <p class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">背景</p>
-              </div>
-              <div class="p-2">
-                <button
-                  phx-click="select_sprite"
-                  phx-value-name={@project.stage.name}
-                  phx-value-type="stage"
-                  class={[
-                    "w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center gap-2",
-                    if(@selected_sprite == @project.stage.name,
-                      do: "bg-[#4C97FF] text-white font-medium",
-                      else: "text-gray-700 hover:bg-gray-100"
-                    )
-                  ]}
-                >
-                  <.sprite_thumbnail sprite={@project.stage} />
-                  <span class="truncate flex-1">背景</span>
-                  <span class={[
-                    "ml-1 text-xs px-1.5 py-0.5 rounded-full",
-                    if(@selected_sprite == @project.stage.name,
-                      do: "bg-white/20 text-white",
-                      else: "bg-gray-100 text-gray-500"
-                    )
-                  ]}>
-                    <%= length(@project.stage.costumes) %>🎨
-                  </span>
-                </button>
-              </div>
+              <button
+                phx-click="select_sprite"
+                phx-value-name={@project.stage.name}
+                phx-value-type="stage"
+                class={[
+                  "flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg min-w-[52px] transition flex-shrink-0",
+                  if(@selected_sprite == @project.stage.name,
+                    do: "bg-[#4C97FF]/10 ring-2 ring-[#4C97FF]",
+                    else: "hover:bg-gray-100"
+                  )
+                ]}
+              >
+                <.sprite_thumbnail sprite={@project.stage} />
+                <span class="text-[10px] text-gray-600 truncate max-w-[48px]">背景</span>
+              </button>
             <% end %>
+            <%= for sprite <- @project.sprites do %>
+              <button
+                phx-click="select_sprite"
+                phx-value-name={sprite.name}
+                phx-value-type="sprite"
+                class={[
+                  "flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg min-w-[52px] transition flex-shrink-0",
+                  if(@selected_sprite == sprite.name,
+                    do: "bg-[#4C97FF]/10 ring-2 ring-[#4C97FF]",
+                    else: "hover:bg-gray-100"
+                  )
+                ]}
+              >
+                <.sprite_thumbnail sprite={sprite} />
+                <span class="text-[10px] text-gray-600 truncate max-w-[48px]"><%= sprite.name %></span>
+              </button>
+            <% end %>
+          </div>
 
-            <!-- Sprites section -->
-            <div class="px-3 py-2 border-b border-gray-100">
-              <p class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-                スプライト (<%= length(@project.sprites) %>)
-              </p>
-            </div>
-            <nav class="p-2 space-y-0.5">
-              <%= for sprite <- @project.sprites do %>
-                <button
-                  phx-click="select_sprite"
-                  phx-value-name={sprite.name}
-                  phx-value-type="sprite"
-                  class={[
-                    "w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center gap-2",
-                    if(@selected_sprite == sprite.name,
-                      do: "bg-[#4C97FF] text-white font-medium",
-                      else: "text-gray-700 hover:bg-gray-100"
-                    )
-                  ]}
-                >
-                  <.sprite_thumbnail sprite={sprite} />
-                  <span class="truncate flex-1"><%= sprite.name %></span>
-                  <span class={[
-                    "ml-1 text-xs px-1.5 py-0.5 rounded-full",
-                    if(@selected_sprite == sprite.name,
-                      do: "bg-white/20 text-white",
-                      else: "bg-gray-100 text-gray-500"
-                    )
-                  ]}>
-                    <%= length(sprite.scripts) %>
-                  </span>
-                </button>
-              <% end %>
-            </nav>
-          </aside>
+          <!-- Tabs -->
+          <div class="bg-white border-b border-gray-200 px-4 flex gap-1 pt-2 flex-shrink-0">
+            <%= for {tab, label, icon} <- tabs() do %>
+              <button
+                phx-click="select_tab"
+                phx-value-tab={tab}
+                class={[
+                  "px-4 py-2 text-sm font-medium rounded-t-lg transition border-b-2",
+                  if(@active_tab == tab,
+                    do: "border-[#4C97FF] text-[#4C97FF]",
+                    else: "border-transparent text-gray-500 hover:text-gray-700"
+                  )
+                ]}
+              >
+                <%= icon %> <%= label %>
+              </button>
+            <% end %>
+          </div>
 
-          <!-- Main content -->
-          <main class="flex-1 overflow-hidden flex flex-col">
-            <!-- Tabs -->
-            <div class="bg-white border-b border-gray-200 px-4 flex gap-1 pt-2">
-              <%= for {tab, label, icon} <- tabs() do %>
-                <button
-                  phx-click="select_tab"
-                  phx-value-tab={tab}
-                  class={[
-                    "px-4 py-2 text-sm font-medium rounded-t-lg transition border-b-2",
-                    if(@active_tab == tab,
-                      do: "border-[#4C97FF] text-[#4C97FF]",
-                      else: "border-transparent text-gray-500 hover:text-gray-700"
-                    )
-                  ]}
-                >
-                  <%= icon %> <%= label %>
-                </button>
-              <% end %>
-            </div>
-
-            <!-- Tab content -->
-            <div class="flex-1 overflow-y-auto p-6">
-              <% target = if(@project && @selected_sprite, do: current_target(@project, @selected_sprite, @selected_target_type), else: nil) %>
-              <%= case @active_tab do %>
-                <% :functions -> %>
-                  <.functions_panel target={target} expanded={@expanded_functions} />
-                <% :variables -> %>
-                  <.variables_panel project={@project} target={target} selected_target_type={@selected_target_type} />
-                <% :code -> %>
-                  <.code_panel target={target} expanded_scripts={@expanded_scripts} />
-                <% :costumes -> %>
-                  <.costumes_panel target={target} />
-                <% :sounds -> %>
-                  <.sounds_panel target={target} />
-              <% end %>
-            </div>
-          </main>
+          <!-- Tab content -->
+          <div class="flex-1 overflow-y-auto p-6">
+            <% target = if(@project && @selected_sprite, do: current_target(@project, @selected_sprite, @selected_target_type), else: nil) %>
+            <%= case @active_tab do %>
+              <% :flow -> %>
+                <.flow_panel project={@project} target={target} flow_detail={@flow_detail} />
+              <% :variables -> %>
+                <.variables_panel project={@project} target={target} selected_target_type={@selected_target_type} />
+              <% :costumes -> %>
+                <.costumes_panel target={target} />
+              <% :sounds -> %>
+                <.sounds_panel target={target} />
+            <% end %>
+          </div>
         </div>
       <% end %>
     </div>
@@ -363,11 +308,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
   # ---- sub-components ----
 
   defp tabs, do: [
-    {:code, "コード", "📜"},
-    {:functions, "ブロック定義", "🔧"},
-    {:variables, "変数", "📦"},
-    {:costumes, "コスチューム", "👔"},
-    {:sounds, "サウンド", "🔊"}
+    {:flow,      "フロー",      "🔀"},
+    {:variables, "変数",        "📦"},
+    {:costumes,  "コスチューム", "👔"},
+    {:sounds,    "サウンド",    "🔊"}
   ]
 
   defp upload_error_text(:too_large), do: "ファイルが大きすぎます（最大 50MB）"
@@ -375,111 +319,166 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp upload_error_text(:too_many_files), do: "ファイルは1つだけ選択してください"
   defp upload_error_text(_), do: "アップロードエラーが発生しました"
 
-  # ---- Functions Panel ----
+  # ---- Flow Panel ----
 
+  attr :project, :map, required: true
   attr :target, :map, default: nil
-  attr :expanded, :any, required: true
+  attr :flow_detail, :map, default: nil
 
-  defp functions_panel(assigns) do
+  defp flow_panel(assigns) do
+    {detail_blocks, detail_title, detail_receivers} =
+      case assigns.flow_detail do
+        %{kind: "script", id: id} when not is_nil(assigns.target) ->
+          script = Enum.find(assigns.target.top_scripts, &(&1.id == id))
+          if script, do: {script.blocks, script.hat_label, nil}, else: {nil, nil, nil}
+
+        %{kind: "block_def", id: name} when not is_nil(assigns.target) ->
+          cb = Enum.find(assigns.target.custom_blocks, &(&1.name == name))
+          if cb, do: {cb.code_blocks, "🔧 #{name}", nil}, else: {nil, nil, nil}
+
+        %{kind: "broadcast", id: msg} ->
+          receivers = find_broadcast_receivers(assigns.project, msg)
+          {nil, "📡 「#{msg}」を受け取るスプライト", receivers}
+
+        _ ->
+          {nil, nil, nil}
+      end
+
+    assigns =
+      assigns
+      |> assign(:detail_blocks, detail_blocks)
+      |> assign(:detail_title, detail_title)
+      |> assign(:detail_receivers, detail_receivers)
+
     ~H"""
     <div>
-      <h2 class="text-base font-semibold text-gray-700 mb-4">
-        ブロック定義
-        <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= display_name(@target) %></span>
+      <!-- グラフエリア -->
+      <%= if @target do %>
+        <%= if Enum.empty?(@target.top_scripts) do %>
+          <.empty_state icon="🔀" message="このスプライトにはスクリプトがありません" />
+        <% else %>
+          <div class="space-y-2 mb-4">
+            <%= for script <- @target.top_scripts do %>
+              <% called = blocks_called_by_script(@target.custom_blocks, script.hat_label) %>
+              <% script_selected = @flow_detail && @flow_detail.kind == "script" && @flow_detail.id == script.id %>
+              <% broadcasts = broadcasts_sent_in_script(script.blocks) %>
+              <div class="flex items-start gap-3">
+                <!-- イベントノード -->
+                <button
+                  phx-click="flow_select_detail"
+                  phx-value-kind="script"
+                  phx-value-id={script.id}
+                  style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if script_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                >
+                  <%= event_icon(script.hat_opcode) %> <%= script.hat_label %>
+                </button>
+                <!-- ノード群（ブロック定義 + 送るメッセージ） -->
+                <%= if not (Enum.empty?(called) && Enum.empty?(broadcasts)) do %>
+                <span style="color: #CC8813; font-size: 1rem; padding-top: 4px; flex-shrink: 0;">→</span>
+                <div class="flex flex-wrap gap-2 pt-0.5">
+                    <%= for cb <- called do %>
+                      <% bd_selected = @flow_detail && @flow_detail.kind == "block_def" && @flow_detail.id == cb.name %>
+                      <button
+                        phx-click="flow_select_detail"
+                        phx-value-kind="block_def"
+                        phx-value-id={cb.name}
+                        style={"background: #FF6680; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bd_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                      >
+                        🔧 <%= cb.name %>
+                      </button>
+                    <% end %>
+                    <%= for msg <- broadcasts do %>
+                      <% bc_selected = @flow_detail && @flow_detail.kind == "broadcast" && @flow_detail.id == msg %>
+                      <button
+                        phx-click="flow_select_detail"
+                        phx-value-kind="broadcast"
+                        phx-value-id={msg}
+                        style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bc_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                      >
+                        📡 <%= msg %>
+                      </button>
+                    <% end %>
+                </div>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
         <% end %>
-      </h2>
-      <%= if @target && Enum.any?(@target.custom_blocks) do %>
-        <div class="space-y-3">
-          <%= for block <- @target.custom_blocks do %>
-            <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+
+        <!-- 詳細ドロワー -->
+        <%= if @flow_detail && (@detail_blocks != nil || @detail_receivers != nil) do %>
+          <div class="border border-gray-200 rounded-xl overflow-hidden bg-white">
+            <div class="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
+              <span class="text-sm font-semibold text-gray-700"><%= @detail_title %></span>
               <button
-                phx-click="toggle_function"
-                phx-value-name={block.name}
-                class="w-full text-left p-4 hover:bg-gray-50 transition"
-              >
-                <div class="flex items-center gap-2">
-                  <span class="text-lg">🔧</span>
-                  <span class="font-medium text-gray-800 text-sm flex-1"><%= block.name %></span>
-                  <span class="text-xs text-gray-400">
-                    <%= length(block.code_blocks) %> ブロック
-                  </span>
-                  <span class={"text-gray-400 text-xs transition-transform #{if MapSet.member?(@expanded, block.name), do: "rotate-180"}"}>
-                    ▼
-                  </span>
-                </div>
-              </button>
-              <%= if MapSet.member?(@expanded, block.name) do %>
-                <div class="border-t border-gray-100 bg-gray-50 p-4">
-                  <%= if Enum.any?(block.code_blocks) do %>
-                    <.block_chain blocks={block.code_blocks} />
-                  <% else %>
-                    <p class="text-xs text-gray-400 italic">ブロックなし</p>
-                  <% end %>
-                </div>
+                phx-click="flow_select_detail"
+                phx-value-kind={@flow_detail.kind}
+                phx-value-id={@flow_detail.id}
+                class="text-gray-400 hover:text-gray-600 text-lg leading-none"
+              >✕</button>
+            </div>
+            <div class="p-4 bg-gray-50">
+              <%= if @detail_blocks do %>
+                <%= if Enum.any?(@detail_blocks) do %>
+                  <.block_chain blocks={@detail_blocks} />
+                <% else %>
+                  <p class="text-xs text-gray-400 italic">ブロックなし</p>
+                <% end %>
+              <% else %>
+                <%= if Enum.any?(@detail_receivers) do %>
+                  <div class="space-y-2">
+                    <%= for {sprite, script} <- @detail_receivers do %>
+                      <button
+                        phx-click="select_sprite"
+                        phx-value-name={sprite.name}
+                        phx-value-type={if sprite.is_stage, do: "stage", else: "sprite"}
+                        class="flex items-center gap-3 w-full bg-white rounded-lg border border-gray-200 px-3 py-2 hover:bg-blue-50 hover:border-blue-200 transition text-left"
+                      >
+                        <.sprite_thumbnail sprite={sprite} />
+                        <span class="text-xs font-medium text-gray-700"><%= display_name(sprite) %></span>
+                        <span class="text-xs text-gray-400">—</span>
+                        <span class="text-xs text-gray-600"><%= script.hat_label %></span>
+                      </button>
+                    <% end %>
+                  </div>
+                <% else %>
+                  <p class="text-xs text-gray-400 italic">このメッセージを受け取るスプライトはありません</p>
+                <% end %>
               <% end %>
             </div>
-          <% end %>
-        </div>
+          </div>
+        <% end %>
       <% else %>
-        <.empty_state icon="🔧" message="このスプライトにブロック定義はありません" />
+        <.empty_state icon="🔀" message="上のサムネイルからスプライトを選択してください" />
       <% end %>
     </div>
     """
   end
 
-  # ---- Code Panel (non-function scripts) ----
+  defp blocks_called_by_script(custom_blocks, hat_label) do
+    Enum.filter(custom_blocks, fn cb ->
+      Enum.any?(cb.called_by, &(&1 == hat_label))
+    end)
+  end
 
-  attr :target, :map, default: nil
-  attr :expanded_scripts, :any, required: true
+  defp find_broadcast_receivers(project, msg) do
+    expected_label = "📡 「#{msg}」を受け取ったとき"
+    all_targets = Enum.filter([project.stage | project.sprites], & &1)
 
-  defp code_panel(assigns) do
-    ~H"""
-    <div>
-      <h2 class="text-base font-semibold text-gray-700 mb-4">
-        スクリプト一覧
-        <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= display_name(@target) %></span>
-        <% end %>
-      </h2>
-      <%= if @target && Enum.any?(@target.top_scripts) do %>
-        <div class="space-y-3">
-          <%= for script <- @target.top_scripts do %>
-            <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <button
-                phx-click="toggle_script"
-                phx-value-id={script.id}
-                class="w-full text-left p-4 hover:bg-gray-50 transition"
-              >
-                <div class="flex items-center gap-2">
-                  <span class="text-lg"><%= event_icon(script.hat_opcode) %></span>
-                  <span class="font-medium text-gray-800 text-sm flex-1"><%= script.hat_label %></span>
-                  <span class="text-xs text-gray-400">
-                    <%= length(script.blocks) %> ブロック
-                  </span>
-                  <span class={"text-gray-400 text-xs transition-transform #{if MapSet.member?(@expanded_scripts, script.id), do: "rotate-180"}"}>
-                    ▼
-                  </span>
-                </div>
-              </button>
+    Enum.flat_map(all_targets, fn target ->
+      target.top_scripts
+      |> Enum.filter(fn s ->
+        s.hat_opcode == "event_whenbroadcastreceived" && s.hat_label == expected_label
+      end)
+      |> Enum.map(fn s -> {target, s} end)
+    end)
+  end
 
-              <%= if MapSet.member?(@expanded_scripts, script.id) do %>
-                <div class="border-t border-gray-100 bg-gray-50 p-4">
-                  <%= if Enum.any?(script.blocks) do %>
-                    <.block_chain blocks={script.blocks} />
-                  <% else %>
-                    <p class="text-xs text-gray-400 italic">ブロックなし</p>
-                  <% end %>
-                </div>
-              <% end %>
-            </div>
-          <% end %>
-        </div>
-      <% else %>
-        <.empty_state icon="📜" message="このスプライトにスクリプトはありません" />
-      <% end %>
-    </div>
-    """
+  defp broadcasts_sent_in_script(blocks) do
+    blocks
+    |> Enum.filter(fn b -> b.opcode in ["event_broadcast", "event_broadcastandwait"] end)
+    |> Enum.flat_map(fn b -> b.params end)
+    |> Enum.uniq()
   end
 
   # ---- Block Chain Renderer ----
@@ -493,17 +492,16 @@ defmodule ScratchInspectorWeb.InspectorLive do
     <div>
       <%= for block <- @vblocks do %>
         <% color = block_color(block.opcode) %>
-        <% wall_color = "#CC8813" %>
         <% is_hat = block.depth == 0 && String.starts_with?(block.opcode, "event_") %>
         <% top_r = if is_hat, do: "18px", else: "4px" %>
         <% bot_r = if block.is_c_opener, do: "0px", else: "4px" %>
 
         <!-- Block row -->
         <div style="display: flex; align-items: stretch; margin-bottom: 1px;">
-          <%= for _ <- List.duplicate(nil, block.depth) do %>
-            <div style={"width: 16px; background-color: #{wall_color}; flex-shrink: 0;"}></div>
+          <%= for {_, i} <- Enum.with_index(List.duplicate(nil, block.depth)) do %>
+            <div style={"width: 16px; background-color: #{wall_color_at(i)}; flex-shrink: 0;"}></div>
           <% end %>
-          <div style={"flex: 1; background-color: #{color}; color: white; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 600; padding: 5px 10px; border-radius: #{top_r} #{top_r} #{bot_r} #{bot_r}; box-shadow: 0 2px 0 rgba(0,0,0,0.22); display: flex; align-items: center; gap: 6px; min-width: 0; user-select: none;"}>
+          <div style={"display: inline-flex; background-color: #{color}; color: white; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 600; padding: 5px 10px; border-radius: #{top_r} #{top_r} #{bot_r} #{bot_r}; box-shadow: 0 2px 0 rgba(0,0,0,0.22); align-items: center; gap: 6px; user-select: none;"}>
             <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><%= block.label %></span>
             <%= for param <- block.params do %>
               <span style="background: rgba(255,255,255,0.9); color: #333; border-radius: 4px; padding: 1px 6px; font-size: 0.7rem; white-space: nowrap; flex-shrink: 0;"><%= param %></span>
@@ -514,10 +512,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
         <!-- C-block closing arms -->
         <%= for prefix_count <- block.closing_arms do %>
           <div style="display: flex; align-items: stretch; margin-bottom: 1px;">
-            <%= for _ <- List.duplicate(nil, prefix_count) do %>
-              <div style={"width: 16px; background-color: #{wall_color}; flex-shrink: 0; min-height: 10px;"}></div>
+            <%= for {_, i} <- Enum.with_index(List.duplicate(nil, prefix_count)) do %>
+              <div style={"width: 16px; background-color: #{wall_color_at(i)}; flex-shrink: 0; min-height: 10px;"}></div>
             <% end %>
-            <div style={"width: 20px; height: 10px; background-color: #{wall_color}; border-radius: 0 0 4px 4px;"}></div>
+            <div style={"width: 20px; height: 10px; background-color: #{wall_color_at(prefix_count)}; border-radius: 0 0 4px 4px;"}></div>
           </div>
         <% end %>
       <% end %>
@@ -549,6 +547,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
         closing_arms: closing_arms
       })
     end)
+  end
+
+  defp wall_color_at(i) do
+    palette = ["#FFAB19", "#4C97FF", "#9966FF", "#59C059", "#CF63CF", "#5CB1D6"]
+    Enum.at(palette, rem(i, length(palette)))
   end
 
   defp block_color(opcode) do
@@ -597,8 +600,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
           <%= for var <- @filtered_variables do %>
             <div class="bg-white rounded-xl border border-gray-200 p-4">
               <div class="flex items-center gap-2 mb-2">
-                <span class="text-lg">📦</span>
+                <span class="text-lg"><%= if var.kind == :list, do: "📋", else: "📦" %></span>
                 <span class="font-medium text-gray-800 text-sm"><%= var.name %></span>
+                <%= if var.kind == :list do %>
+                  <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">リスト</span>
+                <% end %>
                 <span class={[
                   "text-xs px-2 py-0.5 rounded-full",
                   if(var.scope == :global,
@@ -609,30 +615,22 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   <%= if var.scope == :global, do: "グローバル", else: "ローカル" %>
                 </span>
               </div>
-              <div class="ml-7 grid grid-cols-2 gap-2">
-                <%= if Enum.any?(var.readers) do %>
-                  <div>
-                    <p class="text-xs text-gray-400 mb-1">参照</p>
-                    <div class="space-y-1">
-                      <%= for ref <- var.readers do %>
-                        <div class="text-xs bg-green-50 text-green-700 rounded px-2 py-1 font-mono">
-                          <%= ref %>
-                        </div>
-                      <% end %>
-                    </div>
-                  </div>
+              <div class="ml-7 flex flex-wrap gap-1">
+                <%= for ref <- var.readers do %>
+                  <button
+                    phx-click="select_sprite"
+                    phx-value-name={ref}
+                    phx-value-type={if @project.stage && @project.stage.name == ref, do: "stage", else: "sprite"}
+                    class="text-xs bg-green-50 text-green-700 rounded px-2 py-1 font-mono hover:bg-green-100 transition"
+                  ><%= ref %></button>
                 <% end %>
-                <%= if Enum.any?(var.writers) do %>
-                  <div>
-                    <p class="text-xs text-gray-400 mb-1">書き込み</p>
-                    <div class="space-y-1">
-                      <%= for ref <- var.writers do %>
-                        <div class="text-xs bg-red-50 text-red-700 rounded px-2 py-1 font-mono">
-                          <%= ref %>
-                        </div>
-                      <% end %>
-                    </div>
-                  </div>
+                <%= for ref <- var.writers do %>
+                  <button
+                    phx-click="select_sprite"
+                    phx-value-name={ref}
+                    phx-value-type={if @project.stage && @project.stage.name == ref, do: "stage", else: "sprite"}
+                    class="text-xs bg-red-50 text-red-700 rounded px-2 py-1 font-mono hover:bg-red-100 transition"
+                  ><%= ref %></button>
                 <% end %>
               </div>
             </div>
