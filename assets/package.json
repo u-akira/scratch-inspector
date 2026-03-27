@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "headless-vpl": "^0.3.0"
+    "headless-vpl": "^0.3.0",
+    "mermaid": "^10.9.0"
   }
 }

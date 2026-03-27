@@ -7,7 +7,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
       socket
       |> assign(:page_title, "Scratch Inspector")
       |> assign(:project, nil)
-      |> assign(:active_tab, :events)
+      |> assign(:active_tab, :code)
       |> assign(:selected_sprite, nil)
       |> assign(:selected_target_type, nil)
       |> assign(:upload_error, nil)
@@ -144,59 +144,6 @@ defmodule ScratchInspectorWeb.InspectorLive do
     end
   end
 
-  defp all_targets(project) do
-    stage = if project.stage, do: [project.stage], else: []
-    stage ++ project.sprites
-  end
-
-  # 全関数の呼び出し関係グラフ JSON を構築（headless-vpl 用）
-  defp build_graph_json(graph_items, _all_targets, sprite_names) do
-    if Enum.empty?(graph_items) do
-      "null"
-    else
-      # ノード: 各関数定義
-      nodes =
-        graph_items
-        |> Enum.with_index()
-        |> Enum.map(fn {item, idx} ->
-          %{
-            id: "fn_#{idx}",
-            label: item.name,
-            sprite: item.sprite,
-            callCount: item.call_count
-          }
-        end)
-
-      # エッジ: 呼び出し元→関数
-      # called_by は呼び出し元のラベル（hat block のラベル）
-      # 同じスプライト内で呼び出し元が別の関数なら、関数間エッジを作る
-      edges =
-        graph_items
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {item, idx} ->
-          target_id = "fn_#{idx}"
-
-          item.called_by
-          |> Enum.flat_map(fn caller_label ->
-            # 呼び出し元が別の関数定義の場合はエッジを作成
-            graph_items
-            |> Enum.with_index()
-            |> Enum.filter(fn {other, _} ->
-              other.sprite == item.sprite and
-                String.contains?(caller_label, "定義") and
-                other.name != item.name
-            end)
-            |> Enum.map(fn {_, other_idx} ->
-              %{from: "fn_#{other_idx}", to: target_id}
-            end)
-          end)
-        end)
-        |> Enum.uniq()
-
-      Jason.encode!(%{nodes: nodes, edges: edges, sprites: sprite_names})
-    end
-  end
-
   # ---- render ----
 
   @impl true
@@ -303,7 +250,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
             <!-- Stage section -->
             <%= if @project.stage do %>
               <div class="px-3 py-2 border-b border-gray-100">
-                <p class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">ステージ</p>
+                <p class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">背景</p>
               </div>
               <div class="p-2">
                 <button
@@ -311,15 +258,15 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   phx-value-name={@project.stage.name}
                   phx-value-type="stage"
                   class={[
-                    "w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center",
+                    "w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center gap-2",
                     if(@selected_sprite == @project.stage.name,
                       do: "bg-[#4C97FF] text-white font-medium",
                       else: "text-gray-700 hover:bg-gray-100"
                     )
                   ]}
                 >
-                  <span class="mr-2">🎭</span>
-                  <span class="truncate flex-1"><%= @project.stage.name %></span>
+                  <.sprite_thumbnail sprite={@project.stage} />
+                  <span class="truncate flex-1">背景</span>
                   <span class={[
                     "ml-1 text-xs px-1.5 py-0.5 rounded-full",
                     if(@selected_sprite == @project.stage.name,
@@ -346,14 +293,14 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   phx-value-name={sprite.name}
                   phx-value-type="sprite"
                   class={[
-                    "w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center",
+                    "w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center gap-2",
                     if(@selected_sprite == sprite.name,
                       do: "bg-[#4C97FF] text-white font-medium",
                       else: "text-gray-700 hover:bg-gray-100"
                     )
                   ]}
                 >
-                  <span class="mr-2">🐱</span>
+                  <.sprite_thumbnail sprite={sprite} />
                   <span class="truncate flex-1"><%= sprite.name %></span>
                   <span class={[
                     "ml-1 text-xs px-1.5 py-0.5 rounded-full",
@@ -394,12 +341,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
             <div class="flex-1 overflow-y-auto p-6">
               <% target = if(@project && @selected_sprite, do: current_target(@project, @selected_sprite, @selected_target_type), else: nil) %>
               <%= case @active_tab do %>
-                <% :events -> %>
-                  <.events_panel target={target} />
                 <% :functions -> %>
-                  <.functions_panel target={target} expanded={@expanded_functions} project={@project} />
+                  <.functions_panel target={target} expanded={@expanded_functions} />
                 <% :variables -> %>
-                  <.variables_panel project={@project} />
+                  <.variables_panel project={@project} target={target} selected_target_type={@selected_target_type} />
                 <% :code -> %>
                   <.code_panel target={target} expanded_scripts={@expanded_scripts} />
                 <% :costumes -> %>
@@ -418,10 +363,9 @@ defmodule ScratchInspectorWeb.InspectorLive do
   # ---- sub-components ----
 
   defp tabs, do: [
-    {:events, "イベント", "⚡"},
-    {:functions, "関数", "🔧"},
-    {:variables, "変数", "📦"},
     {:code, "コード", "📜"},
+    {:functions, "ブロック定義", "🔧"},
+    {:variables, "変数", "📦"},
     {:costumes, "コスチューム", "👔"},
     {:sounds, "サウンド", "🔊"}
   ]
@@ -431,104 +375,20 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp upload_error_text(:too_many_files), do: "ファイルは1つだけ選択してください"
   defp upload_error_text(_), do: "アップロードエラーが発生しました"
 
-  # ---- Events Panel ----
-
-  attr :target, :map, default: nil
-
-  defp events_panel(assigns) do
-    ~H"""
-    <div>
-      <h2 class="text-base font-semibold text-gray-700 mb-4">
-        イベントフロー
-        <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= @target.name %></span>
-        <% end %>
-      </h2>
-      <%= if @target && Enum.any?(@target.events) do %>
-        <div class="space-y-3">
-          <%= for event <- @target.events do %>
-            <div class="bg-white rounded-xl border border-gray-200 p-4">
-              <div class="flex items-start gap-3">
-                <span class="text-xl mt-0.5"><%= event_icon(event.type) %></span>
-                <div class="flex-1 min-w-0">
-                  <p class="font-medium text-gray-800 text-sm"><%= event_label(event) %></p>
-                  <%= if Enum.any?(event.scripts) do %>
-                    <div class="mt-2 space-y-1">
-                      <%= for script <- event.scripts do %>
-                        <div class="text-xs bg-[#4C97FF]/10 text-[#2d6fd4] rounded-lg px-3 py-1.5 font-mono">
-                          <%= script %>
-                        </div>
-                      <% end %>
-                    </div>
-                  <% end %>
-                </div>
-              </div>
-            </div>
-          <% end %>
-        </div>
-      <% else %>
-        <.empty_state icon="⚡" message="このスプライトにイベントはありません" />
-      <% end %>
-    </div>
-    """
-  end
-
-  # ---- Functions Panel with Call Graph ----
+  # ---- Functions Panel ----
 
   attr :target, :map, default: nil
   attr :expanded, :any, required: true
-  attr :project, :map, required: true
 
   defp functions_panel(assigns) do
-    # 全ターゲットからの呼び出しグラフデータを構築
-    all = if assigns.project, do: all_targets(assigns.project), else: []
-
-    graph_items =
-      all
-      |> Enum.flat_map(fn t ->
-        Enum.map(t.custom_blocks, fn cb ->
-          %{sprite: t.name, name: cb.name, called_by: cb.called_by, call_count: cb.call_count}
-        end)
-      end)
-
-    sprite_names = Enum.map(all, & &1.name) |> Enum.uniq()
-
-    # headless-vpl 用のグラフ JSON を構築
-    graph_json = build_graph_json(graph_items, all, sprite_names)
-
-    assigns =
-      assigns
-      |> assign(:graph_items, graph_items)
-      |> assign(:graph_json, graph_json)
-
     ~H"""
     <div>
       <h2 class="text-base font-semibold text-gray-700 mb-4">
-        関数呼び出しグラフ
+        ブロック定義
         <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= @target.name %></span>
+          <span class="text-gray-400 font-normal">— <%= display_name(@target) %></span>
         <% end %>
       </h2>
-
-      <!-- headless-vpl Call Graph -->
-      <%= if @graph_json != "null" do %>
-        <div class="mb-6 bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div class="px-4 pt-3 pb-1 flex items-center justify-between">
-            <p class="text-xs text-gray-400 font-semibold uppercase tracking-wider">呼び出し関係図</p>
-            <p class="text-[10px] text-gray-300">ドラッグ: 移動 / スクロール: ズーム</p>
-          </div>
-          <div
-            id="call-graph"
-            phx-hook="CallGraph"
-            phx-update="ignore"
-            data-graph={@graph_json}
-            class="w-full"
-            style="height: 400px;"
-          />
-        </div>
-      <% end %>
-
-      <!-- Per-sprite function details -->
       <%= if @target && Enum.any?(@target.custom_blocks) do %>
         <div class="space-y-3">
           <%= for block <- @target.custom_blocks do %>
@@ -540,33 +400,21 @@ defmodule ScratchInspectorWeb.InspectorLive do
               >
                 <div class="flex items-center gap-2">
                   <span class="text-lg">🔧</span>
-                  <span class="font-medium text-gray-800 text-sm font-mono flex-1"><%= block.name %></span>
-                  <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                    <%= block.call_count %> 呼び出し
+                  <span class="font-medium text-gray-800 text-sm flex-1"><%= block.name %></span>
+                  <span class="text-xs text-gray-400">
+                    <%= length(block.code_blocks) %> ブロック
                   </span>
                   <span class={"text-gray-400 text-xs transition-transform #{if MapSet.member?(@expanded, block.name), do: "rotate-180"}"}>
                     ▼
                   </span>
                 </div>
-                <%= if Enum.any?(block.called_by) do %>
-                  <div class="mt-2 ml-7 flex flex-wrap gap-1">
-                    <%= for caller <- block.called_by do %>
-                      <span class="text-xs bg-orange-50 text-orange-700 rounded px-2 py-0.5 font-mono">
-                        ← <%= caller %>
-                      </span>
-                    <% end %>
-                  </div>
-                <% end %>
               </button>
-
-              <!-- Expanded code view -->
               <%= if MapSet.member?(@expanded, block.name) do %>
                 <div class="border-t border-gray-100 bg-gray-50 p-4">
-                  <p class="text-xs text-gray-400 mb-2 font-semibold">コード</p>
                   <%= if Enum.any?(block.code_blocks) do %>
                     <.block_chain blocks={block.code_blocks} />
                   <% else %>
-                    <p class="text-xs text-gray-400 italic">コードブロックが空です</p>
+                    <p class="text-xs text-gray-400 italic">ブロックなし</p>
                   <% end %>
                 </div>
               <% end %>
@@ -574,7 +422,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
           <% end %>
         </div>
       <% else %>
-        <.empty_state icon="🔧" message="このスプライトにカスタムブロックはありません" />
+        <.empty_state icon="🔧" message="このスプライトにブロック定義はありません" />
       <% end %>
     </div>
     """
@@ -591,7 +439,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
       <h2 class="text-base font-semibold text-gray-700 mb-4">
         スクリプト一覧
         <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= @target.name %></span>
+          <span class="text-gray-400 font-normal">— <%= display_name(@target) %></span>
         <% end %>
       </h2>
       <%= if @target && Enum.any?(@target.top_scripts) do %>
@@ -639,63 +487,114 @@ defmodule ScratchInspectorWeb.InspectorLive do
   attr :blocks, :list, required: true
 
   defp block_chain(assigns) do
+    assigns = assign(assigns, :vblocks, to_visual_blocks(assigns.blocks))
+
     ~H"""
-    <div class="space-y-0.5">
-      <%= for block <- @blocks do %>
-        <div
-          class="flex items-start gap-1"
-          style={"padding-left: #{block.depth * 20}px"}
-        >
-          <%= if block.depth > 0 do %>
-            <span class="text-gray-300 text-xs mt-0.5 select-none">┃</span>
+    <div>
+      <%= for block <- @vblocks do %>
+        <% color = block_color(block.opcode) %>
+        <% wall_color = "#CC8813" %>
+        <% is_hat = block.depth == 0 && String.starts_with?(block.opcode, "event_") %>
+        <% top_r = if is_hat, do: "18px", else: "4px" %>
+        <% bot_r = if block.is_c_opener, do: "0px", else: "4px" %>
+
+        <!-- Block row -->
+        <div style="display: flex; align-items: stretch; margin-bottom: 1px;">
+          <%= for _ <- List.duplicate(nil, block.depth) do %>
+            <div style={"width: 16px; background-color: #{wall_color}; flex-shrink: 0;"}></div>
           <% end %>
-          <div class={[
-            "text-xs font-mono rounded px-2 py-1 inline-flex items-center gap-1 max-w-full",
-            block_color(block.opcode)
-          ]}>
-            <span class="truncate"><%= block.label %></span>
-            <%= if Enum.any?(block.params) do %>
-              <span class="text-[10px] opacity-70 truncate">
-                (<%= Enum.join(block.params, ", ") %>)
-              </span>
+          <div style={"flex: 1; background-color: #{color}; color: white; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 600; padding: 5px 10px; border-radius: #{top_r} #{top_r} #{bot_r} #{bot_r}; box-shadow: 0 2px 0 rgba(0,0,0,0.22); display: flex; align-items: center; gap: 6px; min-width: 0; user-select: none;"}>
+            <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><%= block.label %></span>
+            <%= for param <- block.params do %>
+              <span style="background: rgba(255,255,255,0.9); color: #333; border-radius: 4px; padding: 1px 6px; font-size: 0.7rem; white-space: nowrap; flex-shrink: 0;"><%= param %></span>
             <% end %>
           </div>
         </div>
+
+        <!-- C-block closing arms -->
+        <%= for prefix_count <- block.closing_arms do %>
+          <div style="display: flex; align-items: stretch; margin-bottom: 1px;">
+            <%= for _ <- List.duplicate(nil, prefix_count) do %>
+              <div style={"width: 16px; background-color: #{wall_color}; flex-shrink: 0; min-height: 10px;"}></div>
+            <% end %>
+            <div style={"width: 20px; height: 10px; background-color: #{wall_color}; border-radius: 0 0 4px 4px;"}></div>
+          </div>
+        <% end %>
       <% end %>
     </div>
     """
   end
 
+  defp to_visual_blocks([]), do: []
+
+  defp to_visual_blocks(blocks) do
+    n = length(blocks)
+
+    blocks
+    |> Enum.with_index()
+    |> Enum.map(fn {block, i} ->
+      next = if i + 1 < n, do: Enum.at(blocks, i + 1), else: nil
+      next_depth = if next, do: next.depth, else: 0
+      close_count = max(0, block.depth - next_depth)
+
+      closing_arms =
+        if close_count > 0 do
+          Enum.map(0..(close_count - 1), fn k -> block.depth - k - 1 end)
+        else
+          []
+        end
+
+      Map.merge(block, %{
+        is_c_opener: next != nil && next.depth > block.depth,
+        closing_arms: closing_arms
+      })
+    end)
+  end
+
   defp block_color(opcode) do
     cond do
-      String.starts_with?(opcode, "motion_") -> "bg-blue-100 text-blue-800"
-      String.starts_with?(opcode, "looks_") -> "bg-violet-100 text-violet-800"
-      String.starts_with?(opcode, "sound_") -> "bg-fuchsia-100 text-fuchsia-800"
-      String.starts_with?(opcode, "event_") -> "bg-yellow-100 text-yellow-800"
-      String.starts_with?(opcode, "control_") -> "bg-amber-100 text-amber-800"
-      String.starts_with?(opcode, "sensing_") -> "bg-cyan-100 text-cyan-800"
-      String.starts_with?(opcode, "operator_") -> "bg-green-100 text-green-800"
-      String.starts_with?(opcode, "data_") -> "bg-orange-100 text-orange-800"
-      String.starts_with?(opcode, "procedures_") -> "bg-red-100 text-red-800"
-      String.starts_with?(opcode, "pen_") -> "bg-teal-100 text-teal-800"
-      true -> "bg-gray-100 text-gray-700"
+      String.starts_with?(opcode, "motion_")     -> "#4C97FF"
+      String.starts_with?(opcode, "looks_")      -> "#9966FF"
+      String.starts_with?(opcode, "sound_")      -> "#CF63CF"
+      String.starts_with?(opcode, "event_")      -> "#FFAB19"
+      String.starts_with?(opcode, "control_")    -> "#FFAB19"
+      String.starts_with?(opcode, "sensing_")    -> "#5CB1D6"
+      String.starts_with?(opcode, "operator_")   -> "#59C059"
+      String.starts_with?(opcode, "data_")       -> "#FF8C1A"
+      String.starts_with?(opcode, "procedures_") -> "#FF6680"
+      String.starts_with?(opcode, "pen_")        -> "#0fBD8C"
+      true                                       -> "#8E9399"
     end
   end
 
   # ---- Variables Panel ----
 
   attr :project, :map, required: true
+  attr :target, :map, default: nil
+  attr :selected_target_type, :string, default: nil
 
   defp variables_panel(assigns) do
+    # ステージ選択時: グローバル変数のみ / スプライト選択時: そのスプライトのローカル変数のみ
+    filtered =
+      if assigns.selected_target_type == "stage" do
+        Enum.filter(assigns.project.variables, &(&1.scope == :global))
+      else
+        sprite_name = assigns.target && assigns.target.name
+        assigns.project.variables
+        |> Enum.filter(&(&1.scope == :local && &1.sprite == sprite_name))
+      end
+
+    assigns = assign(assigns, :filtered_variables, filtered)
+
     ~H"""
     <div>
       <h2 class="text-base font-semibold text-gray-700 mb-4">
         変数参照マップ
         <span class="text-xs text-gray-400 font-normal ml-2">使用中の変数のみ表示</span>
       </h2>
-      <%= if Enum.any?(@project.variables) do %>
+      <%= if Enum.any?(@filtered_variables) do %>
         <div class="space-y-3">
-          <%= for var <- @project.variables do %>
+          <%= for var <- @filtered_variables do %>
             <div class="bg-white rounded-xl border border-gray-200 p-4">
               <div class="flex items-center gap-2 mb-2">
                 <span class="text-lg">📦</span>
@@ -704,10 +603,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   "text-xs px-2 py-0.5 rounded-full",
                   if(var.scope == :global,
                     do: "bg-purple-100 text-purple-700",
-                    else: "bg-gray-100 text-gray-500"
+                    else: "bg-orange-100 text-orange-700"
                   )
                 ]}>
-                  <%= if var.scope == :global, do: "グローバル", else: var.sprite %>
+                  <%= if var.scope == :global, do: "グローバル", else: "ローカル" %>
                 </span>
               </div>
               <div class="ml-7 grid grid-cols-2 gap-2">
@@ -740,7 +639,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
           <% end %>
         </div>
       <% else %>
-        <.empty_state icon="📦" message="使用中の変数が見つかりませんでした" />
+        <.empty_state icon="📦" message={
+          if @selected_target_type == "stage",
+            do: "使用中のグローバル変数が見つかりませんでした",
+            else: "このスプライトにローカル変数はありません"
+        } />
       <% end %>
     </div>
     """
@@ -756,7 +659,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
       <h2 class="text-base font-semibold text-gray-700 mb-4">
         コスチューム
         <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= @target.name %></span>
+          <span class="text-gray-400 font-normal">— <%= display_name(@target) %></span>
         <% end %>
       </h2>
       <%= if @target && Enum.any?(@target.costumes) do %>
@@ -799,7 +702,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
       <h2 class="text-base font-semibold text-gray-700 mb-4">
         サウンド
         <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= @target.name %></span>
+          <span class="text-gray-400 font-normal">— <%= display_name(@target) %></span>
         <% end %>
       </h2>
       <%= if @target && Enum.any?(@target.sounds) do %>
@@ -854,6 +757,30 @@ defmodule ScratchInspectorWeb.InspectorLive do
     """
   end
 
+  defp display_name(%{is_stage: true}), do: "背景"
+  defp display_name(%{name: name}), do: name
+
+  # ---- Sprite Thumbnail ----
+
+  attr :sprite, :map, required: true
+
+  defp sprite_thumbnail(assigns) do
+    first_costume = List.first(assigns.sprite.costumes || [])
+    assigns = assign(assigns, :costume, first_costume)
+
+    ~H"""
+    <%= if @costume && @costume.base64 do %>
+      <img
+        src={"data:#{@costume.mime};base64,#{@costume.base64}"}
+        alt={@sprite.name}
+        class="w-8 h-8 object-contain flex-shrink-0 rounded"
+      />
+    <% else %>
+      <span class="flex-shrink-0"><%= if @sprite.is_stage, do: "🎭", else: "🐱" %></span>
+    <% end %>
+    """
+  end
+
   # ---- helpers ----
 
   defp event_icon("event_whenflagclicked"), do: "🚩"
@@ -866,11 +793,4 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp event_icon("control_start_as_clone"), do: "🐑"
   defp event_icon(_), do: "⚡"
 
-  defp event_label(%{type: "event_whenflagclicked"}), do: "緑の旗がクリックされたとき"
-  defp event_label(%{type: "event_whenbroadcastreceived", value: v}), do: "「#{v}」を受け取ったとき"
-  defp event_label(%{type: "event_whenkeypressed", value: v}), do: "「#{v}」キーが押されたとき"
-  defp event_label(%{type: "event_whenthisspriteclicked"}), do: "このスプライトがクリックされたとき"
-  defp event_label(%{type: "event_whenstageclicked"}), do: "ステージがクリックされたとき"
-  defp event_label(%{type: "event_whenbackdropswitchesto", value: v}), do: "背景が「#{v}」に切り替わったとき"
-  defp event_label(%{type: t}), do: t
 end

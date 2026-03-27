@@ -23,9 +23,11 @@ import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
 
 import { CallGraphHook } from "./call_graph_hook"
+import { MermaidHook } from "./mermaid_hook"
 
 let Hooks = {
-  CallGraph: CallGraphHook
+  CallGraph: CallGraphHook,
+  MermaidChart: MermaidHook,
 }
 
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

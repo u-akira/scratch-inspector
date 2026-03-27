@@ -52,6 +52,7 @@ defmodule ScratchInspector.Parser do
   defp build_project(data, zip_files) do
     targets = Map.get(data, "targets", [])
     global_vars = extract_global_variables(targets)
+    local_vars = extract_local_variables(targets)
 
     stage_target = Enum.find(targets, fn t -> Map.get(t, "isStage", false) end)
     sprite_targets = Enum.reject(targets, fn t -> Map.get(t, "isStage", false) end)
@@ -67,7 +68,7 @@ defmodule ScratchInspector.Parser do
       name: "",
       stage: stage,
       sprites: sprites,
-      variables: global_vars
+      variables: global_vars ++ local_vars
     }
   end
 
@@ -429,6 +430,13 @@ defmodule ScratchInspector.Parser do
     if is_nil(stage), do: [], else: do_extract_variables(stage, :global, targets)
   end
 
+  defp extract_local_variables(targets) do
+    sprite_targets = Enum.reject(targets, fn t -> Map.get(t, "isStage", false) end)
+    Enum.flat_map(sprite_targets, fn t ->
+      do_extract_variables(t, :local, [t])
+    end)
+  end
+
   defp do_extract_variables(target, scope, all_targets) do
     vars = Map.get(target, "variables", %{})
     sprite_name = Map.get(target, "name")
@@ -606,11 +614,57 @@ defmodule ScratchInspector.Parser do
       "pen_penUp" -> "🖊️ ペンを上げる"
       "pen_setPenColorToColor" -> "🖊️ ペンの色を設定"
       "pen_setPenSizeTo" -> "🖊️ ペンの太さを設定"
+      "pen_changePenSizeBy" -> "🖊️ ペンの太さを変える"
+      "pen_setPenColorParamTo" -> "🖊️ ペンのパラメータを設定"
+      "pen_changePenColorParamBy" -> "🖊️ ペンのパラメータを変える"
+      "pen_menu_colorParam" -> "🖊️ 色パラメータ"
       "procedures_definition" -> "🔧 定義"
       "procedures_call" -> "📞 呼び出し"
       "procedures_prototype" -> "🔧 プロトタイプ"
       "argument_reporter_string_number" -> "📥 引数"
       "argument_reporter_boolean" -> "📥 真偽引数"
+      # モーション（レポーター）
+      "motion_xposition" -> "↔️ x座標"
+      "motion_yposition" -> "↕️ y座標"
+      "motion_direction" -> "🧭 向き"
+      "motion_scroll_right" -> "↔️ 右スクロール"
+      "motion_scroll_up" -> "↕️ 上スクロール"
+      "motion_align_scene" -> "📐 シーンに整列"
+      "motion_goto_menu" -> "📍 移動先"
+      "motion_glideto_menu" -> "📍 滑る先"
+      "motion_pointtowards_menu" -> "🧭 向ける先"
+      # 見た目（レポーター・メニュー）
+      "looks_costumenumbername" -> "👔 コスチューム番号/名"
+      "looks_backdropnumbername" -> "🎨 背景番号/名"
+      "looks_size" -> "🔍 大きさ"
+      "looks_costume" -> "👔 コスチューム"
+      "looks_backdrops" -> "🎨 背景"
+      # 音（レポーター・メニュー）
+      "sound_volume" -> "🔊 音量"
+      "sound_sounds_menu" -> "🔊 サウンド"
+      # センサー（未訳分）
+      "sensing_touchingcolor" -> "👆 色に触れた"
+      "sensing_coloristouchingcolor" -> "👆 色が色に触れた"
+      "sensing_distanceto" -> "📏 距離"
+      "sensing_answer" -> "💬 答え"
+      "sensing_loudness" -> "🔊 音の大きさ"
+      "sensing_mousex" -> "🖱️ マウスのx座標"
+      "sensing_mousey" -> "🖱️ マウスのy座標"
+      "sensing_setdragmode" -> "🖱️ ドラッグモード設定"
+      "sensing_current" -> "🕐 現在の時刻"
+      "sensing_dayssince2000" -> "📅 2000年からの日数"
+      "sensing_username" -> "👤 ユーザー名"
+      "sensing_of" -> "📊 の値"
+      "sensing_of_object_menu" -> "📊 オブジェクト"
+      "sensing_distanceto_menu" -> "📏 距離の対象"
+      "sensing_touchingobjectmenu" -> "👆 触れる対象"
+      "sensing_keyoptions" -> "⌨️ キー"
+      # 演算子（未訳分）
+      "operator_contains" -> "🔍 を含む"
+      # データ（未訳分）
+      "data_showlist" -> "📋 リストを表示"
+      "data_hidelist" -> "📋 リストを隠す"
+      "data_listcontainsitem" -> "📋 リストに含まれる"
       _ -> opcode
     end
   end
