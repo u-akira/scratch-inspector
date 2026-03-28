@@ -17,7 +17,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
       |> allow_upload(:scratch_file,
         accept: :any,
         max_entries: 1,
-        max_file_size: 50_000_000,
+        max_file_size: 200_000_000,
+        chunk_size: 512_000,
         auto_upload: true
       )
 
@@ -354,51 +355,92 @@ defmodule ScratchInspectorWeb.InspectorLive do
     <div>
       <!-- グラフエリア -->
       <%= if @target do %>
-        <%= if Enum.empty?(@target.top_scripts) do %>
+        <%= if Enum.empty?(Enum.filter(@target.top_scripts, fn s -> event_hat?(s.hat_opcode) end)) do %>
           <.empty_state icon="🔀" message="このスプライトにはスクリプトがありません" />
         <% else %>
-          <div class="space-y-2 mb-4">
-            <%= for script <- @target.top_scripts do %>
-              <% called = blocks_called_by_script(@target.custom_blocks, script.hat_label) %>
+          <div class="space-y-3 mb-4">
+            <%= for script <- Enum.filter(@target.top_scripts, fn s -> event_hat?(s.hat_opcode) end) do %>
+              <% called = blocks_called_by_script(@target.custom_blocks, script.id) %>
               <% script_selected = @flow_detail && @flow_detail.kind == "script" && @flow_detail.id == script.id %>
               <% broadcasts = broadcasts_sent_in_script(script.blocks) %>
-              <div class="flex items-start gap-3">
-                <!-- イベントノード -->
-                <button
-                  phx-click="flow_select_detail"
-                  phx-value-kind="script"
-                  phx-value-id={script.id}
-                  style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if script_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                >
-                  <%= event_icon(script.hat_opcode) %> <%= script.hat_label %>
-                </button>
-                <!-- ノード群（ブロック定義 + 送るメッセージ） -->
-                <%= if not (Enum.empty?(called) && Enum.empty?(broadcasts)) do %>
-                <span style="color: #CC8813; font-size: 1rem; padding-top: 4px; flex-shrink: 0;">→</span>
-                <div class="flex flex-wrap gap-2 pt-0.5">
-                    <%= for cb <- called do %>
-                      <% bd_selected = @flow_detail && @flow_detail.kind == "block_def" && @flow_detail.id == cb.name %>
-                      <button
-                        phx-click="flow_select_detail"
-                        phx-value-kind="block_def"
-                        phx-value-id={cb.name}
-                        style={"background: #FF6680; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bd_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                      >
-                        🔧 <%= cb.name %>
-                      </button>
-                    <% end %>
-                    <%= for msg <- broadcasts do %>
-                      <% bc_selected = @flow_detail && @flow_detail.kind == "broadcast" && @flow_detail.id == msg %>
-                      <button
-                        phx-click="flow_select_detail"
-                        phx-value-kind="broadcast"
-                        phx-value-id={msg}
-                        style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bc_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                      >
-                        📡 <%= msg %>
-                      </button>
-                    <% end %>
+              <% sub_rows = build_sub_rows(called, @target.custom_blocks, MapSet.new(Enum.map(called, & &1.name)), 1) %>
+              <div class="space-y-1">
+                <!-- イベント行 -->
+                <div class="flex items-start gap-3">
+                  <button
+                    phx-click="flow_select_detail"
+                    phx-value-kind="script"
+                    phx-value-id={script.id}
+                    style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if script_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                  >
+                    <%= event_icon(script.hat_opcode) %> <%= script.hat_label %>
+                  </button>
+                  <%= if not (Enum.empty?(called) && Enum.empty?(broadcasts)) do %>
+                    <span style="color: #CC8813; font-size: 1rem; padding-top: 4px; flex-shrink: 0;">→</span>
+                    <div class="flex flex-wrap gap-2 pt-0.5">
+                      <%= for cb <- called do %>
+                        <% bd_selected = @flow_detail && @flow_detail.kind == "block_def" && @flow_detail.id == cb.name %>
+                        <button
+                          phx-click="flow_select_detail"
+                          phx-value-kind="block_def"
+                          phx-value-id={cb.name}
+                          style={"background: #FF6680; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bd_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                        >
+                          🔧 <%= cb.name %>
+                        </button>
+                      <% end %>
+                      <%= for msg <- broadcasts do %>
+                        <% bc_selected = @flow_detail && @flow_detail.kind == "broadcast" && @flow_detail.id == msg %>
+                        <button
+                          phx-click="flow_select_detail"
+                          phx-value-kind="broadcast"
+                          phx-value-id={msg}
+                          style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bc_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                        >
+                          📡 <%= msg %>
+                        </button>
+                      <% end %>
+                    </div>
+                  <% end %>
                 </div>
+                <!-- サブ行（ブロック定義からの再帰呼び出し） -->
+                <%= for row <- sub_rows do %>
+                  <div class="flex items-start gap-3" style={"margin-left: #{row.indent * 28}px;"}>
+                    <% src_selected = @flow_detail && @flow_detail.kind == "block_def" && @flow_detail.id == row.source.name %>
+                    <button
+                      phx-click="flow_select_detail"
+                      phx-value-kind="block_def"
+                      phx-value-id={row.source.name}
+                      style={"background: #FF6680; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if src_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                    >
+                      🔧 <%= row.source.name %>
+                    </button>
+                    <span style="color: #CC8813; font-size: 1rem; padding-top: 4px; flex-shrink: 0;">→</span>
+                    <div class="flex flex-wrap gap-2 pt-0.5">
+                      <%= for cb <- row.block_defs do %>
+                        <% bd_selected = @flow_detail && @flow_detail.kind == "block_def" && @flow_detail.id == cb.name %>
+                        <button
+                          phx-click="flow_select_detail"
+                          phx-value-kind="block_def"
+                          phx-value-id={cb.name}
+                          style={"background: #FF6680; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bd_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                        >
+                          🔧 <%= cb.name %>
+                        </button>
+                      <% end %>
+                      <%= for msg <- row.broadcasts do %>
+                        <% bc_selected = @flow_detail && @flow_detail.kind == "broadcast" && @flow_detail.id == msg %>
+                        <button
+                          phx-click="flow_select_detail"
+                          phx-value-kind="broadcast"
+                          phx-value-id={msg}
+                          style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bc_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
+                        >
+                          📡 <%= msg %>
+                        </button>
+                      <% end %>
+                    </div>
+                  </div>
                 <% end %>
               </div>
             <% end %>
@@ -481,6 +523,31 @@ defmodule ScratchInspectorWeb.InspectorLive do
     |> Enum.uniq()
   end
 
+  defp calls_from_block_def(cb, all_custom_blocks, visited) do
+    cb.code_blocks
+    |> Enum.filter(fn b -> b.opcode == "procedures_call" end)
+    |> Enum.map(fn b -> String.replace_prefix(b.label, "📞 ", "") end)
+    |> Enum.uniq()
+    |> Enum.map(fn name -> Enum.find(all_custom_blocks, &(&1.name == name)) end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.reject(fn sub_cb -> MapSet.member?(visited, sub_cb.name) end)
+  end
+
+  defp build_sub_rows(block_defs, all_custom_blocks, visited, indent) do
+    Enum.flat_map(block_defs, fn cb ->
+      sub_calls = calls_from_block_def(cb, all_custom_blocks, visited)
+      sub_broadcasts = broadcasts_sent_in_script(cb.code_blocks)
+
+      if Enum.empty?(sub_calls) && Enum.empty?(sub_broadcasts) do
+        []
+      else
+        row = %{source: cb, block_defs: sub_calls, broadcasts: sub_broadcasts, indent: indent}
+        new_visited = MapSet.union(visited, MapSet.new(Enum.map(sub_calls, & &1.name)))
+        [row | build_sub_rows(sub_calls, all_custom_blocks, new_visited, indent + 1)]
+      end
+    end)
+  end
+
   # ---- Block Chain Renderer ----
 
   attr :blocks, :list, required: true
@@ -498,8 +565,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
         <!-- Block row -->
         <div style="display: flex; align-items: stretch; margin-bottom: 1px;">
-          <%= for {_, i} <- Enum.with_index(List.duplicate(nil, block.depth)) do %>
-            <div style={"width: 16px; background-color: #{wall_color_at(i)}; flex-shrink: 0;"}></div>
+          <%= for wc <- block.wall_colors do %>
+            <div style={"width: 16px; background-color: #{wc}; flex-shrink: 0;"}></div>
+          <% end %>
+          <%= if block.depth > 0 do %>
+            <div style="width: 6px; flex-shrink: 0;"></div>
           <% end %>
           <div style={"display: inline-flex; background-color: #{color}; color: white; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 600; padding: 5px 10px; border-radius: #{top_r} #{top_r} #{bot_r} #{bot_r}; box-shadow: 0 2px 0 rgba(0,0,0,0.22); align-items: center; gap: 6px; user-select: none;"}>
             <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><%= block.label %></span>
@@ -512,10 +582,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
         <!-- C-block closing arms -->
         <%= for prefix_count <- block.closing_arms do %>
           <div style="display: flex; align-items: stretch; margin-bottom: 1px;">
-            <%= for {_, i} <- Enum.with_index(List.duplicate(nil, prefix_count)) do %>
-              <div style={"width: 16px; background-color: #{wall_color_at(i)}; flex-shrink: 0; min-height: 10px;"}></div>
+            <%= for wc <- Enum.take(block.wall_colors, prefix_count) do %>
+              <div style={"width: 16px; background-color: #{wc}; flex-shrink: 0; min-height: 10px;"}></div>
             <% end %>
-            <div style={"width: 20px; height: 10px; background-color: #{wall_color_at(prefix_count)}; border-radius: 0 0 4px 4px;"}></div>
+            <div style={"width: 20px; height: 10px; background-color: #{Enum.at(block.wall_colors, prefix_count, "#FFAB19")}; border-radius: 0 0 4px 4px;"}></div>
           </div>
         <% end %>
       <% end %>
@@ -528,30 +598,35 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp to_visual_blocks(blocks) do
     n = length(blocks)
 
-    blocks
-    |> Enum.with_index()
-    |> Enum.map(fn {block, i} ->
-      next = if i + 1 < n, do: Enum.at(blocks, i + 1), else: nil
-      next_depth = if next, do: next.depth, else: 0
-      close_count = max(0, block.depth - next_depth)
+    {result, _} =
+      blocks
+      |> Enum.with_index()
+      |> Enum.map_reduce(%{}, fn {block, i}, depth_colors ->
+        next = if i + 1 < n, do: Enum.at(blocks, i + 1), else: nil
+        next_depth = if next, do: next.depth, else: 0
+        close_count = max(0, block.depth - next_depth)
+        is_c_opener = next != nil && next.depth > block.depth
 
-      closing_arms =
-        if close_count > 0 do
-          Enum.map(0..(close_count - 1), fn k -> block.depth - k - 1 end)
-        else
-          []
-        end
+        closing_arms =
+          if close_count > 0,
+            do: Enum.map(0..(close_count - 1), fn k -> block.depth - k - 1 end),
+            else: []
 
-      Map.merge(block, %{
-        is_c_opener: next != nil && next.depth > block.depth,
-        closing_arms: closing_arms
-      })
-    end)
-  end
+        wall_colors =
+          if block.depth == 0,
+            do: [],
+            else: Enum.map(0..(block.depth - 1), fn d -> Map.get(depth_colors, d, "#FFAB19") end)
 
-  defp wall_color_at(i) do
-    palette = ["#FFAB19", "#4C97FF", "#9966FF", "#59C059", "#CF63CF", "#5CB1D6"]
-    Enum.at(palette, rem(i, length(palette)))
+        new_depth_colors =
+          if is_c_opener,
+            do: Map.put(depth_colors, block.depth, block_color(block.opcode)),
+            else: depth_colors
+
+        enhanced = Map.merge(block, %{is_c_opener: is_c_opener, closing_arms: closing_arms, wall_colors: wall_colors})
+        {enhanced, new_depth_colors}
+      end)
+
+    result
   end
 
   defp block_color(opcode) do
@@ -780,6 +855,19 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   # ---- helpers ----
+
+  @event_hat_opcodes ~w(
+    event_whenflagclicked
+    event_whenbroadcastreceived
+    event_whenkeypressed
+    event_whenthisspriteclicked
+    event_whenstageclicked
+    event_whengreaterthan
+    event_whenbackdropswitchesto
+    control_start_as_clone
+  )
+
+  defp event_hat?(opcode), do: opcode in @event_hat_opcodes
 
   defp event_icon("event_whenflagclicked"), do: "🚩"
   defp event_icon("event_whenbroadcastreceived"), do: "📡"

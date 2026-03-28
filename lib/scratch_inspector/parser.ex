@@ -410,37 +410,32 @@ defmodule ScratchInspector.Parser do
     |> Enum.filter(fn {_id, block} ->
       is_map(block) and Map.get(block, "opcode") == "procedures_call"
     end)
-    |> Enum.reduce(%{}, fn {_id, block}, acc ->
+    |> Enum.reduce(%{}, fn {id, block}, acc ->
       proccode = block |> Map.get("mutation", %{}) |> Map.get("proccode", "unknown")
-      # 呼び出し元のコンテキスト（親hat blockのラベル）
-      caller_context = find_hat_block_label(block, blocks)
-      Map.update(acc, proccode, [caller_context], &[caller_context | &1])
+      # 呼び出し元のハットブロック ID（ラベルではなく ID で管理し同名イベントを区別）
+      caller_id = find_hat_block_id(id, blocks)
+      if caller_id do
+        Map.update(acc, proccode, [caller_id], &[caller_id | &1])
+      else
+        acc
+      end
     end)
   end
 
-  defp find_hat_block_label(block, blocks, visited \\ MapSet.new()) do
-    parent_id = Map.get(block, "parent")
+  defp find_hat_block_id(block_id, blocks, visited \\ MapSet.new()) do
+    block = Map.get(blocks, block_id)
+    parent_id = if block, do: Map.get(block, "parent"), else: nil
 
     cond do
-      is_nil(parent_id) ->
-        opcode_label(Map.get(block, "opcode", ""))
-
-      MapSet.member?(visited, parent_id) ->
-        "?"
-
+      is_nil(block) -> nil
+      is_nil(parent_id) -> block_id
+      MapSet.member?(visited, block_id) -> nil
       true ->
-        case Map.get(blocks, parent_id) do
-          parent when is_map(parent) ->
-            if is_nil(Map.get(parent, "parent")) do
-              opcode = Map.get(parent, "opcode", "")
-              value = extract_event_value(parent)
-              event_label_from_opcode(opcode, value)
-            else
-              find_hat_block_label(parent, blocks, MapSet.put(visited, parent_id))
-            end
-
-          _ ->
-            "?"
+        parent = Map.get(blocks, parent_id)
+        if parent && is_nil(Map.get(parent, "parent")) do
+          parent_id
+        else
+          find_hat_block_id(parent_id, blocks, MapSet.put(visited, block_id))
         end
     end
   end
@@ -728,7 +723,32 @@ defmodule ScratchInspector.Parser do
       # データ（未訳分）
       "data_showlist" -> "📋 リストを表示"
       "data_hidelist" -> "📋 リストを隠す"
-      "data_listcontainsitem" -> "📋 リストに含まれる"
+      # micro:bit 拡張機能
+      "microbit_whenButtonPressed" -> "🔘 ボタンが押されたとき"
+      "microbit_isButtonPressed" -> "🔘 ボタンが押されている"
+      "microbit_whenGesture" -> "📐 動きを検知したとき"
+      "microbit_displaySymbol" -> "💡 LEDに表示する"
+      "microbit_displayText" -> "💡 テキストを表示する"
+      "microbit_displayClear" -> "💡 LEDを消す"
+      "microbit_whenTilted" -> "📐 傾いたとき"
+      "microbit_isTilted" -> "📐 傾いている"
+      "microbit_getTiltAngle" -> "📐 傾きの角度"
+      "microbit_whenPinConnected" -> "🔌 ピンが繋がれたとき"
+      "microbit_menu_buttons" -> "🔘 ボタン"
+      "microbit_menu_gestures" -> "📐 動き"
+      "microbit_menu_tiltDirectionAny" -> "📐 傾き方向"
+      "microbit_menu_tiltDirection" -> "📐 傾き方向"
+      # toio 拡張機能
+      "toio_whenButtonPressed" -> "🔘 ボタンが押されたとき"
+      "toio_isButtonPressed" -> "🔘 ボタンが押されている"
+      "toio_moveFor" -> "🚗 方向に動かす"
+      "toio_moveWheelsFor" -> "🚗 左右ホイールで動かす"
+      "toio_playNoteFor" -> "🎵 音符を鳴らす"
+      "toio_setLightColorFor" -> "💡 ライトの色を設定"
+      "toio_turnOffLight" -> "💡 ライトを消す"
+      "toio_menu_moveDirections" -> "🚗 移動方向"
+      "toio_menu_changedStates" -> "📊 変化の状態"
+      "toio_menu_isChangedStates" -> "📊 変化状態"
       _ -> opcode
     end
   end
