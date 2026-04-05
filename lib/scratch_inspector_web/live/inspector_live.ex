@@ -56,12 +56,25 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   @impl true
-  def handle_event("flow_select_detail", %{"kind" => kind, "id" => id}, socket) do
+  def handle_event("flow_select_detail", %{"kind" => kind, "id" => id} = params, socket) do
+    socket =
+      case {Map.get(params, "sprite"), Map.get(params, "type")} do
+        {sprite, type} when is_binary(sprite) and is_binary(type) ->
+          socket
+          |> assign(:selected_sprite, sprite)
+          |> assign(:selected_target_type, type)
+
+        _ ->
+          socket
+      end
+
     current = socket.assigns.flow_detail
+
     next =
       if current && current.kind == kind && current.id == id,
         do: nil,
         else: %{kind: kind, id: id}
+
     {:noreply, assign(socket, :flow_detail, next)}
   end
 
@@ -291,7 +304,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
             <% target = if(@project && @selected_sprite, do: current_target(@project, @selected_sprite, @selected_target_type), else: nil) %>
             <%= case @active_tab do %>
               <% :flow -> %>
-                <.flow_panel project={@project} target={target} flow_detail={@flow_detail} />
+                <.flow_graph_panel project={@project} target={target} flow_detail={@flow_detail} />
               <% :variables -> %>
                 <.variables_panel project={@project} target={target} selected_target_type={@selected_target_type} />
               <% :costumes -> %>
@@ -322,11 +335,37 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
   # ---- Flow Panel ----
 
+  defp blocks_called_by_script(custom_blocks, hat_label) do
+    Enum.filter(custom_blocks, fn cb ->
+      Enum.any?(cb.called_by, &(&1 == hat_label))
+    end)
+  end
+
+  defp find_broadcast_receivers(project, msg) do
+    expected_label = "📡 「#{msg}」を受け取ったとき"
+    all_targets = Enum.filter([project.stage | project.sprites], & &1)
+
+    Enum.flat_map(all_targets, fn target ->
+      target.top_scripts
+      |> Enum.filter(fn s ->
+        s.hat_opcode == "event_whenbroadcastreceived" && s.hat_label == expected_label
+      end)
+      |> Enum.map(fn s -> {target, s} end)
+    end)
+  end
+
+  defp broadcasts_sent_in_script(blocks) do
+    blocks
+    |> Enum.filter(fn b -> b.opcode in ["event_broadcast", "event_broadcastandwait"] end)
+    |> Enum.flat_map(fn b -> b.params end)
+    |> Enum.uniq()
+  end
+
   attr :project, :map, required: true
   attr :target, :map, default: nil
   attr :flow_detail, :map, default: nil
 
-  defp flow_panel(assigns) do
+  defp flow_graph_panel(assigns) do
     {detail_blocks, detail_title, detail_receivers} =
       case assigns.flow_detail do
         %{kind: "script", id: id} when not is_nil(assigns.target) ->
@@ -350,104 +389,31 @@ defmodule ScratchInspectorWeb.InspectorLive do
       |> assign(:detail_blocks, detail_blocks)
       |> assign(:detail_title, detail_title)
       |> assign(:detail_receivers, detail_receivers)
+      |> assign(:graph_chart, build_flow_mermaid(assigns.project, assigns.target, assigns.flow_detail))
 
     ~H"""
     <div>
-      <!-- グラフエリア -->
       <%= if @target do %>
-        <%= if Enum.empty?(Enum.filter(@target.top_scripts, fn s -> event_hat?(s.hat_opcode) end)) do %>
+        <%= if is_nil(@graph_chart) do %>
           <.empty_state icon="🔀" message="このスプライトにはスクリプトがありません" />
         <% else %>
-          <div class="space-y-3 mb-4">
-            <%= for script <- Enum.filter(@target.top_scripts, fn s -> event_hat?(s.hat_opcode) end) do %>
-              <% called = blocks_called_by_script(@target.custom_blocks, script.id) %>
-              <% script_selected = @flow_detail && @flow_detail.kind == "script" && @flow_detail.id == script.id %>
-              <% broadcasts = broadcasts_sent_in_script(script.blocks) %>
-              <% sub_rows = build_sub_rows(called, @target.custom_blocks, MapSet.new(Enum.map(called, & &1.name)), 1) %>
-              <div class="space-y-1">
-                <!-- イベント行 -->
-                <div class="flex items-start gap-3">
-                  <button
-                    phx-click="flow_select_detail"
-                    phx-value-kind="script"
-                    phx-value-id={script.id}
-                    style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if script_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                  >
-                    <%= event_icon(script.hat_opcode) %> <%= script.hat_label %>
-                  </button>
-                  <%= if not (Enum.empty?(called) && Enum.empty?(broadcasts)) do %>
-                    <span style="color: #CC8813; font-size: 1rem; padding-top: 4px; flex-shrink: 0;">→</span>
-                    <div class="flex flex-wrap gap-2 pt-0.5">
-                      <%= for cb <- called do %>
-                        <% bd_selected = @flow_detail && @flow_detail.kind == "block_def" && @flow_detail.id == cb.name %>
-                        <button
-                          phx-click="flow_select_detail"
-                          phx-value-kind="block_def"
-                          phx-value-id={cb.name}
-                          style={"background: #FF6680; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bd_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                        >
-                          🔧 <%= cb.name %>
-                        </button>
-                      <% end %>
-                      <%= for msg <- broadcasts do %>
-                        <% bc_selected = @flow_detail && @flow_detail.kind == "broadcast" && @flow_detail.id == msg %>
-                        <button
-                          phx-click="flow_select_detail"
-                          phx-value-kind="broadcast"
-                          phx-value-id={msg}
-                          style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bc_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                        >
-                          📡 <%= msg %>
-                        </button>
-                      <% end %>
-                    </div>
-                  <% end %>
-                </div>
-                <!-- サブ行（ブロック定義からの再帰呼び出し） -->
-                <%= for row <- sub_rows do %>
-                  <div class="flex items-start gap-3" style={"margin-left: #{row.indent * 28}px;"}>
-                    <% src_selected = @flow_detail && @flow_detail.kind == "block_def" && @flow_detail.id == row.source.name %>
-                    <button
-                      phx-click="flow_select_detail"
-                      phx-value-kind="block_def"
-                      phx-value-id={row.source.name}
-                      style={"background: #FF6680; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if src_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                    >
-                      🔧 <%= row.source.name %>
-                    </button>
-                    <span style="color: #CC8813; font-size: 1rem; padding-top: 4px; flex-shrink: 0;">→</span>
-                    <div class="flex flex-wrap gap-2 pt-0.5">
-                      <%= for cb <- row.block_defs do %>
-                        <% bd_selected = @flow_detail && @flow_detail.kind == "block_def" && @flow_detail.id == cb.name %>
-                        <button
-                          phx-click="flow_select_detail"
-                          phx-value-kind="block_def"
-                          phx-value-id={cb.name}
-                          style={"background: #FF6680; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bd_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                        >
-                          🔧 <%= cb.name %>
-                        </button>
-                      <% end %>
-                      <%= for msg <- row.broadcasts do %>
-                        <% bc_selected = @flow_detail && @flow_detail.kind == "broadcast" && @flow_detail.id == msg %>
-                        <button
-                          phx-click="flow_select_detail"
-                          phx-value-kind="broadcast"
-                          phx-value-id={msg}
-                          style={"background: #FFAB19; color: white; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,0.2);#{if bc_selected, do: " outline: 3px solid #4C97FF; outline-offset: 2px;", else: ""}"}
-                        >
-                          📡 <%= msg %>
-                        </button>
-                      <% end %>
-                    </div>
-                  </div>
-                <% end %>
+          <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 class="text-sm font-semibold text-gray-800">Flow Graph</h2>
+                <p class="text-xs text-gray-500">Click a node to inspect its detail below.</p>
               </div>
-            <% end %>
+              <span class="text-xs text-gray-400"><%= display_name(@target) %></span>
+            </div>
+            <div
+              id={"flow-chart-#{flow_dom_id(@target)}"}
+              phx-hook="MermaidChart"
+              data-chart={@graph_chart}
+              class="min-h-[360px] overflow-auto rounded-lg bg-slate-50 px-2 py-4"
+            />
           </div>
         <% end %>
 
-        <!-- 詳細ドロワー -->
         <%= if @flow_detail && (@detail_blocks != nil || @detail_receivers != nil) do %>
           <div class="border border-gray-200 rounded-xl overflow-hidden bg-white">
             <div class="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
@@ -478,7 +444,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                       >
                         <.sprite_thumbnail sprite={sprite} />
                         <span class="text-xs font-medium text-gray-700"><%= display_name(sprite) %></span>
-                        <span class="text-xs text-gray-400">—</span>
+                        <span class="text-xs text-gray-400">→</span>
                         <span class="text-xs text-gray-600"><%= script.hat_label %></span>
                       </button>
                     <% end %>
@@ -497,55 +463,227 @@ defmodule ScratchInspectorWeb.InspectorLive do
     """
   end
 
-  defp blocks_called_by_script(custom_blocks, hat_label) do
-    Enum.filter(custom_blocks, fn cb ->
-      Enum.any?(cb.called_by, &(&1 == hat_label))
-    end)
-  end
+  defp build_flow_mermaid(_project, nil, _flow_detail), do: nil
 
-  defp find_broadcast_receivers(project, msg) do
-    expected_label = "📡 「#{msg}」を受け取ったとき"
-    all_targets = Enum.filter([project.stage | project.sprites], & &1)
-
-    Enum.flat_map(all_targets, fn target ->
+  defp build_flow_mermaid(project, target, flow_detail) do
+    scripts =
       target.top_scripts
-      |> Enum.filter(fn s ->
-        s.hat_opcode == "event_whenbroadcastreceived" && s.hat_label == expected_label
-      end)
-      |> Enum.map(fn s -> {target, s} end)
-    end)
+      |> Enum.filter(&event_hat?(&1.hat_opcode))
+
+    if Enum.empty?(scripts) do
+      nil
+    else
+      custom_blocks = target.custom_blocks
+
+      script_nodes =
+        scripts
+        |> Enum.with_index(1)
+        |> Enum.map(fn {script, idx} ->
+          %{
+            id: "script_#{idx}",
+            detail: %{kind: "script", id: script.id},
+            label: script.hat_label,
+            class: :script,
+            script: script
+          }
+        end)
+
+      script_node_ids = Map.new(script_nodes, fn node -> {node.script.id, node.id} end)
+
+      block_nodes =
+        custom_blocks
+        |> Enum.with_index(1)
+        |> Enum.map(fn {block_def, idx} ->
+          %{
+            id: "block_#{idx}",
+            detail: %{kind: "block_def", id: block_def.name},
+            label: "🔧 #{block_def.name}",
+            class: :block_def,
+            block_def: block_def
+          }
+        end)
+
+      block_node_ids = Map.new(block_nodes, fn node -> {node.block_def.name, node.id} end)
+
+      broadcast_messages =
+        (scripts |> Enum.flat_map(&broadcasts_sent_in_script(&1.blocks))) ++
+          (custom_blocks |> Enum.flat_map(&broadcasts_sent_in_script(&1.code_blocks)))
+        |> Enum.uniq()
+
+      broadcast_nodes =
+        broadcast_messages
+        |> Enum.with_index(1)
+        |> Enum.map(fn {msg, idx} ->
+          %{
+            id: "broadcast_#{idx}",
+            detail: %{kind: "broadcast", id: msg},
+            label: "📡 #{msg}",
+            class: :broadcast,
+            message: msg
+          }
+        end)
+
+      broadcast_node_ids = Map.new(broadcast_nodes, fn node -> {node.message, node.id} end)
+
+      {receiver_nodes, receiver_node_ids} =
+        broadcast_messages
+        |> Enum.flat_map(&find_broadcast_receivers(project, &1))
+        |> Enum.uniq_by(fn {receiver_target, script} ->
+          {receiver_target.name, receiver_target.is_stage, script.id}
+        end)
+        |> Enum.with_index(1)
+        |> Enum.map_reduce(%{}, fn {{receiver_target, script}, idx}, acc ->
+          current_target? =
+            receiver_target.name == target.name &&
+              Map.get(receiver_target, :is_stage, false) == Map.get(target, :is_stage, false)
+
+          node_id =
+            if current_target? do
+              Map.fetch!(script_node_ids, script.id)
+            else
+              "receiver_#{idx}"
+            end
+
+          node =
+            if current_target? do
+              nil
+            else
+              %{
+                id: node_id,
+                detail: %{
+                  kind: "script",
+                  id: script.id,
+                  sprite: receiver_target.name,
+                  type: if(receiver_target.is_stage, do: "stage", else: "sprite")
+                },
+                label: "#{display_name(receiver_target)}<br/>#{script.hat_label}",
+                class: :receiver_script
+              }
+            end
+
+          key = {receiver_target.name, receiver_target.is_stage, script.id}
+          {node, Map.put(acc, key, node_id)}
+        end)
+
+      script_edges =
+        Enum.flat_map(script_nodes, fn node ->
+          called_edges =
+            blocks_called_by_script(custom_blocks, node.script.id)
+            |> Enum.map(fn block_def -> {node.id, Map.get(block_node_ids, block_def.name)} end)
+
+          broadcast_edges =
+            broadcasts_sent_in_script(node.script.blocks)
+            |> Enum.map(fn msg -> {node.id, Map.get(broadcast_node_ids, msg)} end)
+
+          called_edges ++ broadcast_edges
+        end)
+
+      block_edges =
+        Enum.flat_map(block_nodes, fn node ->
+          call_edges =
+            direct_calls_from_block_def(node.block_def, custom_blocks)
+            |> Enum.map(fn sub_cb -> {node.id, Map.get(block_node_ids, sub_cb.name)} end)
+
+          broadcast_edges =
+            broadcasts_sent_in_script(node.block_def.code_blocks)
+            |> Enum.map(fn msg -> {node.id, Map.get(broadcast_node_ids, msg)} end)
+
+          call_edges ++ broadcast_edges
+        end)
+
+      receiver_edges =
+        Enum.flat_map(broadcast_messages, fn msg ->
+          from_id = Map.get(broadcast_node_ids, msg)
+
+          find_broadcast_receivers(project, msg)
+          |> Enum.map(fn {receiver_target, script} ->
+            to_id =
+              Map.get(receiver_node_ids, {receiver_target.name, receiver_target.is_stage, script.id})
+
+            {from_id, to_id}
+          end)
+        end)
+
+      nodes =
+        script_nodes ++ block_nodes ++ broadcast_nodes ++ Enum.reject(receiver_nodes, &is_nil/1)
+
+      edges =
+        (script_edges ++ block_edges ++ receiver_edges)
+        |> Enum.reject(fn {from_id, to_id} -> is_nil(from_id) or is_nil(to_id) end)
+        |> Enum.uniq()
+
+      render_flow_mermaid(nodes, edges, flow_detail)
+    end
   end
 
-  defp broadcasts_sent_in_script(blocks) do
-    blocks
-    |> Enum.filter(fn b -> b.opcode in ["event_broadcast", "event_broadcastandwait"] end)
-    |> Enum.flat_map(fn b -> b.params end)
-    |> Enum.uniq()
-  end
-
-  defp calls_from_block_def(cb, all_custom_blocks, visited) do
+  defp direct_calls_from_block_def(cb, all_custom_blocks) do
     cb.code_blocks
     |> Enum.filter(fn b -> b.opcode == "procedures_call" end)
     |> Enum.map(fn b -> String.replace_prefix(b.label, "📞 ", "") end)
     |> Enum.uniq()
     |> Enum.map(fn name -> Enum.find(all_custom_blocks, &(&1.name == name)) end)
     |> Enum.reject(&is_nil/1)
-    |> Enum.reject(fn sub_cb -> MapSet.member?(visited, sub_cb.name) end)
   end
 
-  defp build_sub_rows(block_defs, all_custom_blocks, visited, indent) do
-    Enum.flat_map(block_defs, fn cb ->
-      sub_calls = calls_from_block_def(cb, all_custom_blocks, visited)
-      sub_broadcasts = broadcasts_sent_in_script(cb.code_blocks)
+  defp render_flow_mermaid(nodes, edges, flow_detail) do
+    header = [
+      "flowchart TD",
+      "classDef scriptNode fill:#FFAB19,stroke:#CC8813,color:#ffffff,stroke-width:2px;",
+      "classDef blockNode fill:#FF6680,stroke:#D64C68,color:#ffffff,stroke-width:2px;",
+      "classDef broadcastNode fill:#FFAB19,stroke:#CC8813,color:#ffffff,stroke-width:2px,stroke-dasharray: 6 3;",
+      "classDef receiverNode fill:#ffffff,stroke:#4C97FF,color:#1f2937,stroke-width:2px;",
+      "classDef selectedNode stroke:#2563EB,stroke-width:4px;"
+    ]
 
-      if Enum.empty?(sub_calls) && Enum.empty?(sub_broadcasts) do
-        []
-      else
-        row = %{source: cb, block_defs: sub_calls, broadcasts: sub_broadcasts, indent: indent}
-        new_visited = MapSet.union(visited, MapSet.new(Enum.map(sub_calls, & &1.name)))
-        [row | build_sub_rows(sub_calls, all_custom_blocks, new_visited, indent + 1)]
-      end
-    end)
+    body =
+      Enum.flat_map(nodes, fn node ->
+        selected? = selected_flow_node?(flow_detail, node.detail)
+        payload = mermaid_payload(node.detail)
+
+        [
+          ~s(#{node.id}["#{escape_mermaid_label(node.label)}"]),
+          "class #{node.id} #{mermaid_class(node.class)};"
+        ] ++
+          if(selected?, do: ["class #{node.id} selectedNode;"], else: []) ++
+          ["click #{node.id} call __mermaidNodeClick(\"#{payload}\")"]
+      end)
+
+    edge_lines = Enum.map(edges, fn {from_id, to_id} -> "#{from_id} --> #{to_id}" end)
+
+    Enum.join(header ++ body ++ edge_lines, "\n")
+  end
+
+  defp selected_flow_node?(nil, _detail), do: false
+  defp selected_flow_node?(%{kind: kind, id: id}, %{kind: kind, id: id}), do: true
+  defp selected_flow_node?(_, _), do: false
+
+  defp mermaid_payload(detail) do
+    detail
+    |> Enum.into(%{})
+    |> Jason.encode!()
+    |> Base.url_encode64(padding: false)
+  end
+
+  defp escape_mermaid_label(label) do
+    label
+    |> String.replace("&", "&amp;")
+    |> String.replace("\"", "&quot;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+    |> String.replace("&lt;br/&gt;", "<br/>")
+    |> String.replace("\n", "<br/>")
+  end
+
+  defp mermaid_class(:script), do: "scriptNode"
+  defp mermaid_class(:block_def), do: "blockNode"
+  defp mermaid_class(:broadcast), do: "broadcastNode"
+  defp mermaid_class(:receiver_script), do: "receiverNode"
+
+  defp flow_dom_id(target) do
+    target
+    |> display_name()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, "-")
   end
 
   # ---- Block Chain Renderer ----
@@ -868,15 +1006,5 @@ defmodule ScratchInspectorWeb.InspectorLive do
   )
 
   defp event_hat?(opcode), do: opcode in @event_hat_opcodes
-
-  defp event_icon("event_whenflagclicked"), do: "🚩"
-  defp event_icon("event_whenbroadcastreceived"), do: "📡"
-  defp event_icon("event_whenkeypressed"), do: "⌨️"
-  defp event_icon("event_whenthisspriteclicked"), do: "🖱️"
-  defp event_icon("event_whenstageclicked"), do: "🖱️"
-  defp event_icon("event_whengreaterthan"), do: "📊"
-  defp event_icon("event_whenbackdropswitchesto"), do: "🎨"
-  defp event_icon("control_start_as_clone"), do: "🐑"
-  defp event_icon(_), do: "⚡"
 
 end

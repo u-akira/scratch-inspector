@@ -22,11 +22,9 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
 
-import { CallGraphHook } from "./call_graph_hook"
 import { MermaidHook } from "./mermaid_hook"
 
 let Hooks = {
-  CallGraph: CallGraphHook,
   MermaidChart: MermaidHook,
 }
 
@@ -50,4 +48,3 @@ liveSocket.connect()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
-

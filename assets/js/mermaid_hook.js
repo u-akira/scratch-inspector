@@ -5,7 +5,7 @@ mermaid.initialize({
   theme: "default",
   flowchart: {
     curve: "basis",
-    useMaxWidth: true,
+    useMaxWidth: false,
     htmlLabels: true,
   },
   securityLevel: "loose",
@@ -15,8 +15,11 @@ let diagramCounter = 0
 
 // グローバルクリックハンドラ: Mermaid の click ディレクティブから呼ばれる
 // payload は Base64URL エンコードされた "スプライト名__関数名"
-window.__mermaidNodeClick = function (nodeId, payload) {
-  if (!payload || !window.__mermaidLiveHook) return
+window.__mermaidNodeClick = function (arg1, arg2) {
+  if (!window.__mermaidLiveHook) return
+
+  const payload = typeof arg2 === "string" ? arg2 : typeof arg1 === "string" ? arg1 : null
+  if (!payload) return
   try {
     // Base64URL → 通常 Base64 → decode
     const b64 = payload.replace(/-/g, "+").replace(/_/g, "/")
@@ -26,11 +29,8 @@ window.__mermaidNodeClick = function (nodeId, payload) {
         .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
         .join("")
     )
-    const sepIdx = decoded.indexOf("__")
-    if (sepIdx === -1) return
-    const sprite = decoded.substring(0, sepIdx)
-    const func_name = decoded.substring(sepIdx + 2)
-    window.__mermaidLiveHook.pushEvent("select_function", { sprite, func_name })
+    const detail = JSON.parse(decoded)
+    window.__mermaidLiveHook.pushEvent("flow_select_detail", detail)
   } catch (e) {
     console.error("mermaid click decode error", e)
   }
@@ -73,8 +73,10 @@ export const MermaidHook = {
       // SVG をレスポンシブにする
       const svgEl = this.el.querySelector("svg")
       if (svgEl) {
-        svgEl.style.maxWidth = "100%"
-        svgEl.style.height = "auto"
+        svgEl.style.maxWidth = "none"
+        svgEl.style.width = "max-content"
+        svgEl.style.height = "max-content"
+        svgEl.style.display = "block"
       }
     } catch (e) {
       console.error("Mermaid render error:", e)
