@@ -95,6 +95,163 @@ defmodule ScratchInspector.Parser do
     }
   end
 
+  defp build_render_stack(nil, _blocks), do: []
+
+  defp build_render_stack(start_id, blocks) do
+    case Map.get(blocks, start_id) do
+      block when is_map(block) ->
+        current = build_render_block(start_id, block, blocks)
+        next_id = Map.get(block, "next")
+        [current | build_render_stack(next_id, blocks)]
+
+      _ ->
+        []
+    end
+  end
+
+  defp build_render_block(id, block, blocks) do
+    opcode = Map.get(block, "opcode", "")
+    inputs = Map.get(block, "inputs", %{})
+    fields = Map.get(block, "fields", %{})
+
+    %{
+      id: id,
+      opcode: opcode,
+      category: block_category(opcode),
+      shape: block_shape(opcode),
+      label: render_block_label(block),
+      parts: render_block_parts(fields, inputs, blocks),
+      branches: render_block_branches(inputs, blocks)
+    }
+  end
+
+  defp render_block_label(block) do
+    opcode = Map.get(block, "opcode", "")
+
+    if opcode == "procedures_call" do
+      block |> Map.get("mutation", %{}) |> Map.get("proccode", "custom block")
+    else
+      opcode_label(opcode)
+    end
+  end
+
+  defp render_block_parts(fields, inputs, blocks) do
+    field_parts =
+      fields
+      |> Enum.sort_by(fn {key, _} -> key end)
+      |> Enum.map(fn {key, value} ->
+        %{name: key, slot: :round, value: render_field_value(value)}
+      end)
+      |> Enum.reject(&is_nil(&1.value))
+
+    input_parts =
+      inputs
+      |> Enum.reject(fn {key, _} -> String.starts_with?(key, "SUBSTACK") || key == "custom_block" end)
+      |> Enum.sort_by(fn {key, _} -> key end)
+      |> Enum.map(fn {key, value} ->
+        %{name: key, slot: input_slot_shape(key, value, blocks), value: render_input_value(value, blocks)}
+      end)
+      |> Enum.reject(fn part -> is_nil(part.value) or part.value == "" end)
+
+    field_parts ++ input_parts
+  end
+
+  defp render_field_value([value | _]) when is_binary(value), do: value
+  defp render_field_value(_), do: nil
+
+  defp render_input_value([_, second], blocks), do: render_input_atom(second, blocks)
+  defp render_input_value([_, second, _fallback], blocks), do: render_input_atom(second, blocks)
+  defp render_input_value(_, _blocks), do: nil
+
+  defp render_input_atom([_type, value | _], _blocks) when is_binary(value), do: value
+  defp render_input_atom([_type, value | _], _blocks) when is_number(value), do: to_string(value)
+
+  defp render_input_atom(id, blocks) when is_binary(id) do
+    case Map.get(blocks, id) do
+      block when is_map(block) ->
+        %{kind: :block, block: build_render_block(id, block, blocks)}
+
+      _ ->
+        "?"
+    end
+  end
+
+  defp render_input_atom(_, _blocks), do: nil
+
+  defp render_block_branches(inputs, blocks) do
+    inputs
+    |> Enum.filter(fn {key, _} -> String.starts_with?(key, "SUBSTACK") end)
+    |> Enum.sort_by(fn {key, _} -> key end)
+    |> Enum.map(fn {key, value} ->
+      substack_id = extract_input_id(value)
+      %{name: key, blocks: build_render_stack(substack_id, blocks)}
+    end)
+    |> Enum.reject(fn branch -> Enum.empty?(branch.blocks) end)
+  end
+
+  defp input_slot_shape(_key, [_, second], blocks), do: slot_shape_from_input(second, blocks)
+  defp input_slot_shape(_key, [_, second, _fallback], blocks), do: slot_shape_from_input(second, blocks)
+  defp input_slot_shape(_key, _value, _blocks), do: :round
+
+  defp slot_shape_from_input(id, blocks) when is_binary(id) do
+    case Map.get(blocks, id) do
+      %{"opcode" => opcode} -> block_input_shape(opcode)
+      _ -> :round
+    end
+  end
+
+  defp slot_shape_from_input(_, _blocks), do: :round
+
+  defp block_input_shape(opcode) do
+    cond do
+      opcode in ["operator_gt", "operator_lt", "operator_equals", "operator_and", "operator_or", "operator_not"] ->
+        :boolean
+
+      String.starts_with?(opcode, "operator_") or String.starts_with?(opcode, "sensing_") ->
+        :round
+
+      opcode in ["data_variable", "data_listcontents", "argument_reporter_boolean", "argument_reporter_string_number"] ->
+        :round
+
+      true ->
+        :round
+    end
+  end
+
+  defp block_shape(opcode) do
+    cond do
+      opcode in ["event_whenflagclicked", "event_whenbroadcastreceived", "event_whenkeypressed",
+                 "event_whenthisspriteclicked", "event_whenstageclicked", "event_whengreaterthan",
+                 "event_whenbackdropswitchesto", "control_start_as_clone"] ->
+        :hat
+
+      opcode in ["control_forever", "control_repeat", "control_repeat_until", "control_if", "control_if_else"] ->
+        :c_block
+
+      opcode == "control_stop" ->
+        :cap
+
+      true ->
+        :stack
+    end
+  end
+
+  defp block_category(opcode) do
+    cond do
+      String.starts_with?(opcode, "motion_") -> :motion
+      String.starts_with?(opcode, "looks_") -> :looks
+      String.starts_with?(opcode, "sound_") -> :sound
+      String.starts_with?(opcode, "event_") -> :event
+      String.starts_with?(opcode, "control_") -> :control
+      String.starts_with?(opcode, "sensing_") -> :sensing
+      String.starts_with?(opcode, "operator_") -> :operator
+      String.starts_with?(opcode, "data_") -> :data
+      String.starts_with?(opcode, "procedures_") -> :custom
+      String.starts_with?(opcode, "pen_") -> :pen
+      true -> :default
+    end
+  end
+
   # ---- costumes & sounds ----
 
   defp extract_costumes(target, zip_files) do
@@ -172,7 +329,7 @@ defmodule ScratchInspector.Parser do
         label =
           if opcode == "procedures_call" do
             proccode = block |> Map.get("mutation", %{}) |> Map.get("proccode", "?")
-            "📞 #{proccode}"
+            proccode
           else
             opcode_label(opcode)
           end
@@ -297,7 +454,8 @@ defmodule ScratchInspector.Parser do
         id: id,
         hat_label: label,
         hat_opcode: opcode,
-        blocks: chain
+        blocks: chain,
+        render_blocks: build_render_stack(next_id, blocks)
       }
     end)
     |> Enum.sort_by(fn s -> s.hat_opcode end)
@@ -387,20 +545,23 @@ defmodule ScratchInspector.Parser do
         next_id = Map.get(block, "next")
         code_blocks = if next_id, do: walk_block_chain(next_id, blocks), else: []
 
-        {id, name, code_blocks}
+        render_blocks = build_render_stack(next_id, blocks)
+
+        {id, name, code_blocks, render_blocks}
       end)
 
     # procedure_call ブロックから呼び出し関係を構築
     call_map = build_call_map(blocks)
 
-    Enum.map(definitions, fn {_def_id, name, code_blocks} ->
+    Enum.map(definitions, fn {_def_id, name, code_blocks, render_blocks} ->
       callers = Map.get(call_map, name, [])
 
       %{
         name: name,
         called_by: callers,
         call_count: length(callers),
-        code_blocks: code_blocks
+        code_blocks: code_blocks,
+        render_blocks: render_blocks
       }
     end)
   end
@@ -479,37 +640,8 @@ defmodule ScratchInspector.Parser do
   end
 
   defp find_variable_refs(var_name, targets) do
-    readers =
-      targets
-      |> Enum.flat_map(fn t ->
-        sprite_name = Map.get(t, "name", "?")
-        blocks = Map.get(t, "blocks", %{})
-
-        blocks
-        |> Enum.filter(fn {_id, block} ->
-          is_map(block) and
-            Map.get(block, "opcode") == "data_variable" and
-            block |> Map.get("fields", %{}) |> Map.get("VARIABLE", []) |> List.first() == var_name
-        end)
-        |> Enum.map(fn _ -> sprite_name end)
-      end)
-      |> Enum.uniq()
-
-    writers =
-      targets
-      |> Enum.flat_map(fn t ->
-        sprite_name = Map.get(t, "name", "?")
-        blocks = Map.get(t, "blocks", %{})
-
-        blocks
-        |> Enum.filter(fn {_id, block} ->
-          is_map(block) and
-            Map.get(block, "opcode") in ["data_setvariableto", "data_changevariableby"] and
-            block |> Map.get("fields", %{}) |> Map.get("VARIABLE", []) |> List.first() == var_name
-        end)
-        |> Enum.map(fn _ -> sprite_name end)
-      end)
-      |> Enum.uniq()
+    readers = find_block_refs(var_name, targets, ["data_variable"], "VARIABLE", :read)
+    writers = find_block_refs(var_name, targets, ["data_setvariableto", "data_changevariableby"], "VARIABLE", :write)
 
     {readers, writers}
   end
@@ -518,68 +650,107 @@ defmodule ScratchInspector.Parser do
     reader_opcodes = ~w(data_listcontents data_itemnumoflist data_itemoflist data_lengthoflist data_listcontainsitem)
     writer_opcodes = ~w(data_addtolist data_deleteoflist data_deletealloflist data_insertatlist data_replaceitemoflist)
 
-    readers =
-      targets
-      |> Enum.flat_map(fn t ->
-        sprite_name = Map.get(t, "name", "?")
-        blocks = Map.get(t, "blocks", %{})
-
-        blocks
-        |> Enum.filter(fn {_id, block} ->
-          is_map(block) and
-            Map.get(block, "opcode") in reader_opcodes and
-            block |> Map.get("fields", %{}) |> Map.get("LIST", []) |> List.first() == list_name
-        end)
-        |> Enum.map(fn _ -> sprite_name end)
-      end)
-      |> Enum.uniq()
-
-    writers =
-      targets
-      |> Enum.flat_map(fn t ->
-        sprite_name = Map.get(t, "name", "?")
-        blocks = Map.get(t, "blocks", %{})
-
-        blocks
-        |> Enum.filter(fn {_id, block} ->
-          is_map(block) and
-            Map.get(block, "opcode") in writer_opcodes and
-            block |> Map.get("fields", %{}) |> Map.get("LIST", []) |> List.first() == list_name
-        end)
-        |> Enum.map(fn _ -> sprite_name end)
-      end)
-      |> Enum.uniq()
+    readers = find_block_refs(list_name, targets, reader_opcodes, "LIST", :read)
+    writers = find_block_refs(list_name, targets, writer_opcodes, "LIST", :write)
 
     {readers, writers}
+  end
+
+  defp find_block_refs(name, targets, opcodes, field_name, access) do
+    targets
+    |> Enum.flat_map(fn target ->
+      blocks = Map.get(target, "blocks", %{})
+
+      blocks
+      |> Enum.filter(fn {_id, block} ->
+        is_map(block) and
+          Map.get(block, "opcode") in opcodes and
+          block |> Map.get("fields", %{}) |> Map.get(field_name, []) |> List.first() == name
+      end)
+      |> Enum.map(fn {block_id, _block} -> build_usage_ref(target, blocks, block_id, access) end)
+      |> Enum.reject(&is_nil/1)
+    end)
+    |> Enum.uniq_by(fn ref ->
+      {ref.sprite, ref.type, ref.detail_kind, ref.detail_id, ref.access}
+    end)
+  end
+
+  defp build_usage_ref(target, blocks, block_id, access) do
+    case find_hat_block_id(block_id, blocks) do
+      nil ->
+        nil
+
+      owner_id ->
+        case Map.get(blocks, owner_id) do
+          %{"opcode" => "procedures_definition"} = block ->
+            detail_id = procedure_name(block, blocks)
+
+            %{
+              sprite: Map.get(target, "name", "?"),
+              type: if(Map.get(target, "isStage", false), do: "stage", else: "sprite"),
+              detail_kind: "block_def",
+              detail_id: detail_id,
+              detail_label: detail_id,
+              access: access
+            }
+
+          %{} = block ->
+            detail_label = top_level_label(block)
+
+            %{
+              sprite: Map.get(target, "name", "?"),
+              type: if(Map.get(target, "isStage", false), do: "stage", else: "sprite"),
+              detail_kind: "script",
+              detail_id: owner_id,
+              detail_label: detail_label,
+              access: access
+            }
+
+          _ ->
+            nil
+        end
+    end
+  end
+
+  defp procedure_name(block, blocks) do
+    proto_id = block |> Map.get("inputs", %{}) |> Map.get("custom_block", []) |> List.last()
+    proto = Map.get(blocks, proto_id, %{})
+    proto |> Map.get("mutation", %{}) |> Map.get("proccode", "unknown")
+  end
+
+  defp top_level_label(block) do
+    opcode = Map.get(block, "opcode", "")
+    value = extract_event_value(block)
+    event_label_from_opcode(opcode, value)
   end
 
   # ---- labels ----
 
   defp event_label_from_opcode(opcode, value) do
     case opcode do
-      "event_whenflagclicked" -> "🚩 緑の旗がクリックされたとき"
-      "event_whenbroadcastreceived" -> "📡 「#{value}」を受け取ったとき"
-      "event_whenkeypressed" -> "⌨️ 「#{value}」キーが押されたとき"
-      "event_whenthisspriteclicked" -> "🖱️ スプライトがクリックされたとき"
-      "event_whenstageclicked" -> "🖱️ ステージがクリックされたとき"
-      "event_whenbackdropswitchesto" -> "🎨 背景が「#{value}」に切り替わったとき"
-      "event_whengreaterthan" -> "📊 値が超えたとき"
-      "control_start_as_clone" -> "🐑 クローンされたとき"
+      "event_whenflagclicked" -> "緑の旗がクリックされたとき"
+      "event_whenbroadcastreceived" -> "「#{value}」を受け取ったとき"
+      "event_whenkeypressed" -> "「#{value}」キーが押されたとき"
+      "event_whenthisspriteclicked" -> "スプライトがクリックされたとき"
+      "event_whenstageclicked" -> "ステージがクリックされたとき"
+      "event_whenbackdropswitchesto" -> "背景が「#{value}」に切り替わったとき"
+      "event_whengreaterthan" -> "値が超えたとき"
+      "control_start_as_clone" -> "クローンされたとき"
       _ -> opcode_label(opcode)
     end
   end
 
   def opcode_label(opcode) do
     case opcode do
-      "event_whenflagclicked" -> "🚩 緑の旗"
-      "event_whenbroadcastreceived" -> "📡 メッセージ受信"
-      "event_whenkeypressed" -> "⌨️ キー押下"
-      "event_whenthisspriteclicked" -> "🖱️ スプライトクリック"
-      "event_whenstageclicked" -> "🖱️ ステージクリック"
-      "event_whengreaterthan" -> "📊 値が超えたとき"
-      "event_whenbackdropswitchesto" -> "🎨 背景切替"
-      "event_broadcast" -> "📡 送る"
-      "event_broadcastandwait" -> "📡 送って待つ"
+      "event_whenflagclicked" -> "緑の旗"
+      "event_whenbroadcastreceived" -> "メッセージ受信"
+      "event_whenkeypressed" -> "キー押下"
+      "event_whenthisspriteclicked" -> "スプライトクリック"
+      "event_whenstageclicked" -> "ステージクリック"
+      "event_whengreaterthan" -> "値が超えたとき"
+      "event_whenbackdropswitchesto" -> "背景切替"
+      "event_broadcast" -> "送る"
+      "event_broadcastandwait" -> "送って待つ"
       "control_repeat" -> "🔄 繰り返す"
       "control_repeat_until" -> "🔄 まで繰り返す"
       "control_forever" -> "🔁 ずっと"
@@ -588,8 +759,8 @@ defmodule ScratchInspector.Parser do
       "control_wait" -> "⏱️ 待つ"
       "control_wait_until" -> "⏱️ まで待つ"
       "control_stop" -> "🛑 止める"
-      "control_start_as_clone" -> "🐑 クローンされたとき"
-      "control_create_clone_of" -> "🐑 クローンを作る"
+      "control_start_as_clone" -> "クローンされたとき"
+      "control_create_clone_of" -> "クローンを作る"
       "control_delete_this_clone" -> "🗑️ クローンを削除"
       "motion_movesteps" -> "➡️ 歩動かす"
       "motion_turnright" -> "↩️ 右に回す"
@@ -612,10 +783,10 @@ defmodule ScratchInspector.Parser do
       "looks_thinkforsecs" -> "💭 秒考える"
       "looks_show" -> "👁️ 表示する"
       "looks_hide" -> "🙈 隠す"
-      "looks_switchcostumeto" -> "👔 コスチュームを変える"
-      "looks_nextcostume" -> "👔 次のコスチューム"
-      "looks_switchbackdropto" -> "🎨 背景を変える"
-      "looks_nextbackdrop" -> "🎨 次の背景"
+      "looks_switchcostumeto" -> "コスチュームを変える"
+      "looks_nextcostume" -> "次のコスチューム"
+      "looks_switchbackdropto" -> "背景を変える"
+      "looks_nextbackdrop" -> "次の背景"
       "looks_changesizeby" -> "🔍 大きさを変える"
       "looks_setsizeto" -> "🔍 大きさを設定"
       "looks_changeeffectby" -> "✨ 効果を変える"
@@ -623,33 +794,33 @@ defmodule ScratchInspector.Parser do
       "looks_cleargraphiceffects" -> "✨ 効果をなくす"
       "looks_gotofrontback" -> "📐 最前面/最背面"
       "looks_goforwardbackwardlayers" -> "📐 レイヤー移動"
-      "sound_play" -> "🔊 音を鳴らす"
-      "sound_playuntildone" -> "🔊 終わるまで音を鳴らす"
+      "sound_play" -> "音を鳴らす"
+      "sound_playuntildone" -> "終わるまで音を鳴らす"
       "sound_stopallsounds" -> "🔇 全ての音を止める"
-      "sound_setvolumeto" -> "🔊 音量を設定"
-      "sound_changevolumeby" -> "🔊 音量を変える"
-      "sound_seteffectto" -> "🔊 音の効果を設定"
-      "sound_changeeffectby" -> "🔊 音の効果を変える"
-      "sound_cleareffects" -> "🔊 音の効果をなくす"
+      "sound_setvolumeto" -> "音量を設定"
+      "sound_changevolumeby" -> "音量を変える"
+      "sound_seteffectto" -> "音の効果を設定"
+      "sound_changeeffectby" -> "音の効果を変える"
+      "sound_cleareffects" -> "音の効果をなくす"
       "sensing_askandwait" -> "❓ 聞いて待つ"
       "sensing_touchingobject" -> "👆 触れた"
-      "sensing_keypressed" -> "⌨️ キーが押された"
-      "sensing_mousedown" -> "🖱️ マウスが押された"
+      "sensing_keypressed" -> "キーが押された"
+      "sensing_mousedown" -> "マウスが押された"
       "sensing_timer" -> "⏱️ タイマー"
       "sensing_resettimer" -> "⏱️ タイマーリセット"
-      "data_setvariableto" -> "📦 変数を設定"
-      "data_changevariableby" -> "📦 変数を変える"
-      "data_variable" -> "📦 変数"
-      "data_showvariable" -> "📦 変数を表示"
-      "data_hidevariable" -> "📦 変数を隠す"
-      "data_addtolist" -> "📋 リストに追加"
-      "data_deleteoflist" -> "📋 リストから削除"
-      "data_deletealloflist" -> "📋 リスト全削除"
-      "data_insertatlist" -> "📋 リストに挿入"
-      "data_replaceitemoflist" -> "📋 リスト項目を置換"
-      "data_itemoflist" -> "📋 リスト項目"
-      "data_lengthoflist" -> "📋 リスト長さ"
-      "data_listcontainsitem" -> "📋 リストに含まれる"
+      "data_setvariableto" -> "変数を設定"
+      "data_changevariableby" -> "変数を変える"
+      "data_variable" -> "変数"
+      "data_showvariable" -> "変数を表示"
+      "data_hidevariable" -> "変数を隠す"
+      "data_addtolist" -> "リストに追加"
+      "data_deleteoflist" -> "リストから削除"
+      "data_deletealloflist" -> "リスト全削除"
+      "data_insertatlist" -> "リストに挿入"
+      "data_replaceitemoflist" -> "リスト項目を置換"
+      "data_itemoflist" -> "リスト項目"
+      "data_lengthoflist" -> "リスト長さ"
+      "data_listcontainsitem" -> "リストに含まれる"
       "operator_add" -> "➕ 足す"
       "operator_subtract" -> "➖ 引く"
       "operator_multiply" -> "✖️ 掛ける"
@@ -677,9 +848,9 @@ defmodule ScratchInspector.Parser do
       "pen_setPenColorParamTo" -> "🖊️ ペンのパラメータを設定"
       "pen_changePenColorParamBy" -> "🖊️ ペンのパラメータを変える"
       "pen_menu_colorParam" -> "🖊️ 色パラメータ"
-      "procedures_definition" -> "🔧 定義"
-      "procedures_call" -> "📞 呼び出し"
-      "procedures_prototype" -> "🔧 プロトタイプ"
+      "procedures_definition" -> "定義"
+      "procedures_call" -> "呼び出し"
+      "procedures_prototype" -> "プロトタイプ"
       "argument_reporter_string_number" -> "📥 引数"
       "argument_reporter_boolean" -> "📥 真偽引数"
       # モーション（レポーター）
@@ -693,36 +864,36 @@ defmodule ScratchInspector.Parser do
       "motion_glideto_menu" -> "📍 滑る先"
       "motion_pointtowards_menu" -> "🧭 向ける先"
       # 見た目（レポーター・メニュー）
-      "looks_costumenumbername" -> "👔 コスチューム番号/名"
-      "looks_backdropnumbername" -> "🎨 背景番号/名"
+      "looks_costumenumbername" -> "コスチューム番号/名"
+      "looks_backdropnumbername" -> "背景番号/名"
       "looks_size" -> "🔍 大きさ"
-      "looks_costume" -> "👔 コスチューム"
-      "looks_backdrops" -> "🎨 背景"
+      "looks_costume" -> "コスチューム"
+      "looks_backdrops" -> "背景"
       # 音（レポーター・メニュー）
-      "sound_volume" -> "🔊 音量"
-      "sound_sounds_menu" -> "🔊 サウンド"
+      "sound_volume" -> "音量"
+      "sound_sounds_menu" -> "サウンド"
       # センサー（未訳分）
       "sensing_touchingcolor" -> "👆 色に触れた"
       "sensing_coloristouchingcolor" -> "👆 色が色に触れた"
       "sensing_distanceto" -> "📏 距離"
       "sensing_answer" -> "💬 答え"
-      "sensing_loudness" -> "🔊 音の大きさ"
-      "sensing_mousex" -> "🖱️ マウスのx座標"
-      "sensing_mousey" -> "🖱️ マウスのy座標"
-      "sensing_setdragmode" -> "🖱️ ドラッグモード設定"
+      "sensing_loudness" -> "音の大きさ"
+      "sensing_mousex" -> "マウスのx座標"
+      "sensing_mousey" -> "マウスのy座標"
+      "sensing_setdragmode" -> "ドラッグモード設定"
       "sensing_current" -> "🕐 現在の時刻"
       "sensing_dayssince2000" -> "📅 2000年からの日数"
       "sensing_username" -> "👤 ユーザー名"
-      "sensing_of" -> "📊 の値"
-      "sensing_of_object_menu" -> "📊 オブジェクト"
+      "sensing_of" -> "の値"
+      "sensing_of_object_menu" -> "オブジェクト"
       "sensing_distanceto_menu" -> "📏 距離の対象"
       "sensing_touchingobjectmenu" -> "👆 触れる対象"
-      "sensing_keyoptions" -> "⌨️ キー"
+      "sensing_keyoptions" -> "キー"
       # 演算子（未訳分）
       "operator_contains" -> "🔍 を含む"
       # データ（未訳分）
-      "data_showlist" -> "📋 リストを表示"
-      "data_hidelist" -> "📋 リストを隠す"
+      "data_showlist" -> "リストを表示"
+      "data_hidelist" -> "リストを隠す"
       # micro:bit 拡張機能
       "microbit_whenButtonPressed" -> "🔘 ボタンが押されたとき"
       "microbit_isButtonPressed" -> "🔘 ボタンが押されている"
@@ -747,8 +918,8 @@ defmodule ScratchInspector.Parser do
       "toio_setLightColorFor" -> "💡 ライトの色を設定"
       "toio_turnOffLight" -> "💡 ライトを消す"
       "toio_menu_moveDirections" -> "🚗 移動方向"
-      "toio_menu_changedStates" -> "📊 変化の状態"
-      "toio_menu_isChangedStates" -> "📊 変化状態"
+      "toio_menu_changedStates" -> "変化の状態"
+      "toio_menu_isChangedStates" -> "変化状態"
       _ -> opcode
     end
   end

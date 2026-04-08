@@ -14,6 +14,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
       |> assign(:processing, false)
       |> assign(:show_sprite_code, false)
       |> assign(:flow_detail, nil)
+      |> assign(:expanded_variable_key, nil)
       |> allow_upload(:scratch_file,
         accept: :any,
         max_entries: 1,
@@ -42,7 +43,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
      |> assign(:selected_sprite, name)
      |> assign(:selected_target_type, type)
      |> assign(:show_sprite_code, false)
-     |> assign(:flow_detail, nil)}
+     |> assign(:flow_detail, nil)
+     |> assign(:expanded_variable_key, nil)}
   end
 
   @impl true
@@ -79,6 +81,22 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   @impl true
+  def handle_event("toggle_variable_detail", %{"key" => key}, socket) do
+    next = if socket.assigns.expanded_variable_key == key, do: nil, else: key
+    {:noreply, assign(socket, :expanded_variable_key, next)}
+  end
+
+  @impl true
+  def handle_event("jump_to_variable_usage", params, socket) do
+    {:noreply,
+     socket
+     |> assign(:selected_sprite, params["sprite"])
+     |> assign(:selected_target_type, params["type"])
+     |> assign(:active_tab, :flow)
+     |> assign(:flow_detail, %{kind: params["detail-kind"], id: params["detail-id"]})}
+  end
+
+  @impl true
   def handle_event("reset", _params, socket) do
     {:noreply,
      socket
@@ -89,7 +107,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
      |> assign(:active_tab, :flow)
      |> assign(:processing, false)
      |> assign(:show_sprite_code, false)
-     |> assign(:flow_detail, nil)}
+     |> assign(:flow_detail, nil)
+     |> assign(:expanded_variable_key, nil)}
   end
 
   defp do_process_upload(socket) do
@@ -118,7 +137,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
              |> assign(:selected_sprite, if(project.stage, do: project.stage.name, else: nil))
              |> assign(:selected_target_type, if(project.stage, do: "stage", else: nil))
              |> assign(:upload_error, nil)
-             |> assign(:processing, false)}
+             |> assign(:processing, false)
+             |> assign(:expanded_variable_key, nil)}
 
           {:error, reason} ->
             {:noreply,
@@ -282,7 +302,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
           <!-- Tabs -->
           <div class="bg-white border-b border-gray-200 px-4 flex gap-1 pt-2 flex-shrink-0">
-            <%= for {tab, label, icon} <- tabs() do %>
+            <%= for {tab, label, _icon} <- tabs() do %>
               <button
                 phx-click="select_tab"
                 phx-value-tab={tab}
@@ -294,7 +314,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   )
                 ]}
               >
-                <%= icon %> <%= label %>
+                <%= label %>
               </button>
             <% end %>
           </div>
@@ -306,7 +326,12 @@ defmodule ScratchInspectorWeb.InspectorLive do
               <% :flow -> %>
                 <.flow_graph_panel project={@project} target={target} flow_detail={@flow_detail} />
               <% :variables -> %>
-                <.variables_panel project={@project} target={target} selected_target_type={@selected_target_type} />
+                <.variables_panel
+                  project={@project}
+                  target={target}
+                  selected_target_type={@selected_target_type}
+                  expanded_variable_key={@expanded_variable_key}
+                />
               <% :costumes -> %>
                 <.costumes_panel target={target} />
               <% :sounds -> %>
@@ -322,10 +347,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
   # ---- sub-components ----
 
   defp tabs, do: [
-    {:flow,      "フロー",      "🔀"},
-    {:variables, "変数",        "📦"},
-    {:costumes,  "コスチューム", "👔"},
-    {:sounds,    "サウンド",    "🔊"}
+    {:flow,      "フロー",      ""},
+    {:variables, "変数",        ""},
+    {:costumes,  "コスチューム", ""},
+    {:sounds,    "サウンド",    ""}
   ]
 
   defp upload_error_text(:too_large), do: "ファイルが大きすぎます（最大 50MB）"
@@ -342,7 +367,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   defp find_broadcast_receivers(project, msg) do
-    expected_label = "📡 「#{msg}」を受け取ったとき"
+    expected_label = "「#{msg}」を受け取ったとき"
     all_targets = Enum.filter([project.stage | project.sprites], & &1)
 
     Enum.flat_map(all_targets, fn target ->
@@ -366,19 +391,19 @@ defmodule ScratchInspectorWeb.InspectorLive do
   attr :flow_detail, :map, default: nil
 
   defp flow_graph_panel(assigns) do
-    {detail_blocks, detail_title, detail_receivers} =
+    {detail_script, detail_title, detail_receivers} =
       case assigns.flow_detail do
         %{kind: "script", id: id} when not is_nil(assigns.target) ->
           script = Enum.find(assigns.target.top_scripts, &(&1.id == id))
-          if script, do: {script.blocks, script.hat_label, nil}, else: {nil, nil, nil}
+          if script, do: {%{kind: :script, script: script}, script.hat_label, nil}, else: {nil, nil, nil}
 
         %{kind: "block_def", id: name} when not is_nil(assigns.target) ->
           cb = Enum.find(assigns.target.custom_blocks, &(&1.name == name))
-          if cb, do: {cb.code_blocks, "🔧 #{name}", nil}, else: {nil, nil, nil}
+          if cb, do: {%{kind: :custom_block, block_def: cb}, name, nil}, else: {nil, nil, nil}
 
         %{kind: "broadcast", id: msg} ->
           receivers = find_broadcast_receivers(assigns.project, msg)
-          {nil, "📡 「#{msg}」を受け取るスプライト", receivers}
+          {nil, "「#{msg}」を受け取るスプライト", receivers}
 
         _ ->
           {nil, nil, nil}
@@ -386,7 +411,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
     assigns =
       assigns
-      |> assign(:detail_blocks, detail_blocks)
+      |> assign(:detail_script, detail_script)
       |> assign(:detail_title, detail_title)
       |> assign(:detail_receivers, detail_receivers)
       |> assign(:graph_chart, build_flow_mermaid(assigns.project, assigns.target, assigns.flow_detail))
@@ -395,7 +420,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
     <div>
       <%= if @target do %>
         <%= if is_nil(@graph_chart) do %>
-          <.empty_state icon="🔀" message="このスプライトにはスクリプトがありません" />
+          <.empty_state icon="" message="このスプライトにはスクリプトがありません" />
         <% else %>
           <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <div class="mb-3 flex items-center justify-between gap-3">
@@ -409,12 +434,45 @@ defmodule ScratchInspectorWeb.InspectorLive do
               id={"flow-chart-#{flow_dom_id(@target)}"}
               phx-hook="MermaidChart"
               data-chart={@graph_chart}
-              class="min-h-[360px] overflow-auto rounded-lg bg-slate-50 px-2 py-4"
-            />
+              class="rounded-lg bg-slate-50"
+            >
+              <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2">
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-zoom-action="out"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-800"
+                    aria-label="Zoom out"
+                  >
+                    -
+                  </button>
+                  <button
+                    type="button"
+                    data-zoom-action="in"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-800"
+                    aria-label="Zoom in"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    data-zoom-action="reset"
+                    class="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-800"
+                  >
+                    100%
+                  </button>
+                </div>
+                <span data-zoom-label class="text-xs font-medium text-slate-500">100%</span>
+              </div>
+              <div
+                data-role="viewport"
+                class="min-h-[360px] overflow-auto px-2 py-4"
+              />
+            </div>
           </div>
         <% end %>
 
-        <%= if @flow_detail && (@detail_blocks != nil || @detail_receivers != nil) do %>
+        <%= if @flow_detail && (@detail_script != nil || @detail_receivers != nil) do %>
           <div class="border border-gray-200 rounded-xl overflow-hidden bg-white">
             <div class="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
               <span class="text-sm font-semibold text-gray-700"><%= @detail_title %></span>
@@ -426,9 +484,9 @@ defmodule ScratchInspectorWeb.InspectorLive do
               >✕</button>
             </div>
             <div class="p-4 bg-gray-50">
-              <%= if @detail_blocks do %>
-                <%= if Enum.any?(@detail_blocks) do %>
-                  <.block_chain blocks={@detail_blocks} />
+              <%= if @detail_script do %>
+                <%= if detail_blocks_present?(@detail_script) do %>
+                  <.scratch_script_detail detail={@detail_script} />
                 <% else %>
                   <p class="text-xs text-gray-400 italic">ブロックなし</p>
                 <% end %>
@@ -457,7 +515,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
           </div>
         <% end %>
       <% else %>
-        <.empty_state icon="🔀" message="上のサムネイルからスプライトを選択してください" />
+        <.empty_state icon="" message="上のサムネイルからスプライトを選択してください" />
       <% end %>
     </div>
     """
@@ -497,7 +555,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
           %{
             id: "block_#{idx}",
             detail: %{kind: "block_def", id: block_def.name},
-            label: "🔧 #{block_def.name}",
+            label: block_def.name,
             class: :block_def,
             block_def: block_def
           }
@@ -517,7 +575,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
           %{
             id: "broadcast_#{idx}",
             detail: %{kind: "broadcast", id: msg},
-            label: "📡 #{msg}",
+            label: msg,
             class: :broadcast,
             message: msg
           }
@@ -686,108 +744,174 @@ defmodule ScratchInspectorWeb.InspectorLive do
     |> String.replace(~r/[^a-z0-9]+/u, "-")
   end
 
-  # ---- Block Chain Renderer ----
+  defp detail_blocks_present?(%{kind: :script, script: script}), do: Enum.any?(script.render_blocks || [])
+  defp detail_blocks_present?(%{kind: :custom_block, block_def: block_def}), do: Enum.any?(block_def.render_blocks || [])
+  defp detail_blocks_present?(_), do: false
+
+  attr :detail, :map, required: true
+
+  defp scratch_script_detail(assigns) do
+    {header_block, blocks} =
+      case assigns.detail do
+        %{kind: :script, script: script} ->
+          header = %{
+            opcode: script.hat_opcode,
+            category: :event,
+            shape: :hat,
+            label: script.hat_label,
+            parts: [],
+            branches: []
+          }
+
+          {header, script.render_blocks || []}
+
+        %{kind: :custom_block, block_def: block_def} ->
+          header = %{
+            opcode: "procedures_definition",
+            category: :custom,
+            shape: :hat,
+            label: block_def.name,
+            parts: [],
+            branches: []
+          }
+
+          {header, block_def.render_blocks || []}
+      end
+
+    assigns =
+      assigns
+      |> assign(:header_block, header_block)
+      |> assign(:blocks, blocks)
+
+    ~H"""
+    <div class="overflow-auto rounded-xl bg-[#eef3f8] p-4">
+      <div class="inline-block min-w-full">
+        <.scratch_block block={@header_block} />
+        <.scratch_stack blocks={@blocks} />
+      </div>
+    </div>
+    """
+  end
 
   attr :blocks, :list, required: true
 
-  defp block_chain(assigns) do
-    assigns = assign(assigns, :vblocks, to_visual_blocks(assigns.blocks))
-
+  defp scratch_stack(assigns) do
     ~H"""
-    <div>
-      <%= for block <- @vblocks do %>
-        <% color = block_color(block.opcode) %>
-        <% is_hat = block.depth == 0 && String.starts_with?(block.opcode, "event_") %>
-        <% top_r = if is_hat, do: "18px", else: "4px" %>
-        <% bot_r = if block.is_c_opener, do: "0px", else: "4px" %>
-
-        <!-- Block row -->
-        <div style="display: flex; align-items: stretch; margin-bottom: 1px;">
-          <%= for wc <- block.wall_colors do %>
-            <div style={"width: 16px; background-color: #{wc}; flex-shrink: 0;"}></div>
-          <% end %>
-          <%= if block.depth > 0 do %>
-            <div style="width: 6px; flex-shrink: 0;"></div>
-          <% end %>
-          <div style={"display: inline-flex; background-color: #{color}; color: white; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 600; padding: 5px 10px; border-radius: #{top_r} #{top_r} #{bot_r} #{bot_r}; box-shadow: 0 2px 0 rgba(0,0,0,0.22); align-items: center; gap: 6px; user-select: none;"}>
-            <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><%= block.label %></span>
-            <%= for param <- block.params do %>
-              <span style="background: rgba(255,255,255,0.9); color: #333; border-radius: 4px; padding: 1px 6px; font-size: 0.7rem; white-space: nowrap; flex-shrink: 0;"><%= param %></span>
-            <% end %>
-          </div>
-        </div>
-
-        <!-- C-block closing arms -->
-        <%= for prefix_count <- block.closing_arms do %>
-          <div style="display: flex; align-items: stretch; margin-bottom: 1px;">
-            <%= for wc <- Enum.take(block.wall_colors, prefix_count) do %>
-              <div style={"width: 16px; background-color: #{wc}; flex-shrink: 0; min-height: 10px;"}></div>
-            <% end %>
-            <div style={"width: 20px; height: 10px; background-color: #{Enum.at(block.wall_colors, prefix_count, "#FFAB19")}; border-radius: 0 0 4px 4px;"}></div>
-          </div>
-        <% end %>
+    <div class="space-y-1">
+      <%= for block <- @blocks do %>
+        <.scratch_block block={block} />
       <% end %>
     </div>
     """
   end
 
-  defp to_visual_blocks([]), do: []
+  attr :block, :map, required: true
 
-  defp to_visual_blocks(blocks) do
-    n = length(blocks)
+  defp scratch_block(assigns) do
+    assigns =
+      assigns
+      |> assign(:category_class, scratch_category_class(assigns.block.category))
+      |> assign(:shape_class, scratch_shape_class(assigns.block.shape))
+      |> assign(:display_label, detail_block_label(assigns.block.label))
 
-    {result, _} =
-      blocks
-      |> Enum.with_index()
-      |> Enum.map_reduce(%{}, fn {block, i}, depth_colors ->
-        next = if i + 1 < n, do: Enum.at(blocks, i + 1), else: nil
-        next_depth = if next, do: next.depth, else: 0
-        close_count = max(0, block.depth - next_depth)
-        is_c_opener = next != nil && next.depth > block.depth
+    ~H"""
+    <div class="mb-1">
+      <div class={[
+        "inline-flex min-h-[38px] max-w-full items-center gap-1 px-3 py-2 text-sm font-semibold text-white shadow-[inset_0_-2px_0_rgba(0,0,0,0.18)]",
+        @category_class,
+        @shape_class
+      ]}>
+        <span class="leading-tight"><%= @display_label %></span>
+        <%= for part <- @block.parts do %>
+          <.scratch_part part={part} />
+        <% end %>
+      </div>
 
-        closing_arms =
-          if close_count > 0,
-            do: Enum.map(0..(close_count - 1), fn k -> block.depth - k - 1 end),
-            else: []
-
-        wall_colors =
-          if block.depth == 0,
-            do: [],
-            else: Enum.map(0..(block.depth - 1), fn d -> Map.get(depth_colors, d, "#FFAB19") end)
-
-        new_depth_colors =
-          if is_c_opener,
-            do: Map.put(depth_colors, block.depth, block_color(block.opcode)),
-            else: depth_colors
-
-        enhanced = Map.merge(block, %{is_c_opener: is_c_opener, closing_arms: closing_arms, wall_colors: wall_colors})
-        {enhanced, new_depth_colors}
-      end)
-
-    result
+      <%= for branch <- @block.branches do %>
+        <div class="ml-6 mt-1 rounded-l-2xl border-l-4 border-white/80 pl-3">
+          <.scratch_stack blocks={branch.blocks} />
+        </div>
+      <% end %>
+    </div>
+    """
   end
 
-  defp block_color(opcode) do
-    cond do
-      String.starts_with?(opcode, "motion_")     -> "#4C97FF"
-      String.starts_with?(opcode, "looks_")      -> "#9966FF"
-      String.starts_with?(opcode, "sound_")      -> "#CF63CF"
-      String.starts_with?(opcode, "event_")      -> "#FFAB19"
-      String.starts_with?(opcode, "control_")    -> "#FFAB19"
-      String.starts_with?(opcode, "sensing_")    -> "#5CB1D6"
-      String.starts_with?(opcode, "operator_")   -> "#59C059"
-      String.starts_with?(opcode, "data_")       -> "#FF8C1A"
-      String.starts_with?(opcode, "procedures_") -> "#FF6680"
-      String.starts_with?(opcode, "pen_")        -> "#0fBD8C"
-      true                                       -> "#8E9399"
-    end
+  attr :part, :map, required: true
+
+  defp scratch_part(assigns) do
+    ~H"""
+    <%= if is_map(@part.value) and @part.value.kind == :block do %>
+      <span class={["inline-flex items-center", slot_shell_class(@part.slot)]}>
+        <.scratch_inline_block block={@part.value.block} />
+      </span>
+    <% else %>
+      <span class={["inline-flex items-center px-2 py-0.5 text-xs font-medium text-slate-700", slot_shell_class(@part.slot)]}>
+        <%= @part.value %>
+      </span>
+    <% end %>
+    """
   end
+
+  attr :block, :map, required: true
+
+  defp scratch_inline_block(assigns) do
+    assigns =
+      assigns
+      |> assign(:category_class, scratch_category_class(assigns.block.category))
+      |> assign(:shape_class, inline_shape_class(assigns.block.shape))
+      |> assign(:display_label, detail_block_label(assigns.block.label))
+
+    ~H"""
+    <span class={[
+      "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-white",
+      @category_class,
+      @shape_class
+    ]}>
+      <span><%= @display_label %></span>
+      <%= for part <- @block.parts do %>
+        <.scratch_part part={part} />
+      <% end %>
+    </span>
+    """
+  end
+
+  defp detail_block_label(label) when is_binary(label) do
+    label
+    |> String.replace(~r/^[^\p{L}\p{N}]+/u, "")
+    |> String.trim_leading()
+  end
+
+  defp detail_block_label(label), do: label
+
+  defp scratch_category_class(:motion), do: "bg-[#4C97FF]"
+  defp scratch_category_class(:looks), do: "bg-[#9966FF]"
+  defp scratch_category_class(:sound), do: "bg-[#CF63CF]"
+  defp scratch_category_class(:event), do: "bg-[#FFBF00]"
+  defp scratch_category_class(:control), do: "bg-[#FFAB19]"
+  defp scratch_category_class(:sensing), do: "bg-[#5CB1D6]"
+  defp scratch_category_class(:operator), do: "bg-[#59C059]"
+  defp scratch_category_class(:data), do: "bg-[#FF8C1A]"
+  defp scratch_category_class(:custom), do: "bg-[#FF6680]"
+  defp scratch_category_class(:pen), do: "bg-[#0FBD8C]"
+  defp scratch_category_class(_), do: "bg-slate-500"
+
+  defp scratch_shape_class(:hat), do: "rounded-t-[1.35rem] rounded-b-lg"
+  defp scratch_shape_class(:c_block), do: "rounded-lg"
+  defp scratch_shape_class(:cap), do: "rounded-t-lg rounded-b-[1.25rem]"
+  defp scratch_shape_class(_), do: "rounded-lg"
+
+  defp inline_shape_class(:boolean), do: "rounded-[1rem]"
+  defp inline_shape_class(_), do: "rounded-md"
+
+  defp slot_shell_class(:boolean), do: "rounded-[1rem] bg-white/95"
+  defp slot_shell_class(_), do: "rounded-md bg-white/95"
 
   # ---- Variables Panel ----
 
   attr :project, :map, required: true
   attr :target, :map, default: nil
   attr :selected_target_type, :string, default: nil
+  attr :expanded_variable_key, :string, default: nil
 
   defp variables_panel(assigns) do
     # ステージ選択時: グローバル変数のみ / スプライト選択時: そのスプライトのローカル変数のみ
@@ -800,7 +924,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
         |> Enum.filter(&(&1.scope == :local && &1.sprite == sprite_name))
       end
 
-    assigns = assign(assigns, :filtered_variables, filtered)
+    assigns =
+      assigns
+      |> assign(:variables, Enum.filter(filtered, &(&1.kind == :variable)))
+      |> assign(:lists, Enum.filter(filtered, &(&1.kind == :list)))
 
     ~H"""
     <div>
@@ -808,49 +935,13 @@ defmodule ScratchInspectorWeb.InspectorLive do
         変数参照マップ
         <span class="text-xs text-gray-400 font-normal ml-2">使用中の変数のみ表示</span>
       </h2>
-      <%= if Enum.any?(@filtered_variables) do %>
+      <%= if Enum.any?(@variables) or Enum.any?(@lists) do %>
         <div class="space-y-3">
-          <%= for var <- @filtered_variables do %>
-            <div class="bg-white rounded-xl border border-gray-200 p-4">
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-lg"><%= if var.kind == :list, do: "📋", else: "📦" %></span>
-                <span class="font-medium text-gray-800 text-sm"><%= var.name %></span>
-                <%= if var.kind == :list do %>
-                  <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">リスト</span>
-                <% end %>
-                <span class={[
-                  "text-xs px-2 py-0.5 rounded-full",
-                  if(var.scope == :global,
-                    do: "bg-purple-100 text-purple-700",
-                    else: "bg-orange-100 text-orange-700"
-                  )
-                ]}>
-                  <%= if var.scope == :global, do: "グローバル", else: "ローカル" %>
-                </span>
-              </div>
-              <div class="ml-7 flex flex-wrap gap-1">
-                <%= for ref <- var.readers do %>
-                  <button
-                    phx-click="select_sprite"
-                    phx-value-name={ref}
-                    phx-value-type={if @project.stage && @project.stage.name == ref, do: "stage", else: "sprite"}
-                    class="text-xs bg-green-50 text-green-700 rounded px-2 py-1 font-mono hover:bg-green-100 transition"
-                  ><%= ref %></button>
-                <% end %>
-                <%= for ref <- var.writers do %>
-                  <button
-                    phx-click="select_sprite"
-                    phx-value-name={ref}
-                    phx-value-type={if @project.stage && @project.stage.name == ref, do: "stage", else: "sprite"}
-                    class="text-xs bg-red-50 text-red-700 rounded px-2 py-1 font-mono hover:bg-red-100 transition"
-                  ><%= ref %></button>
-                <% end %>
-              </div>
-            </div>
-          <% end %>
+          <.variable_group title="変数" items={@variables} expanded_variable_key={@expanded_variable_key} />
+          <.variable_group title="リスト" items={@lists} expanded_variable_key={@expanded_variable_key} />
         </div>
       <% else %>
-        <.empty_state icon="📦" message={
+        <.empty_state icon="" message={
           if @selected_target_type == "stage",
             do: "使用中のグローバル変数が見つかりませんでした",
             else: "このスプライトにローカル変数はありません"
@@ -859,6 +950,138 @@ defmodule ScratchInspectorWeb.InspectorLive do
     </div>
     """
   end
+
+  attr :title, :string, required: true
+  attr :items, :list, required: true
+  attr :expanded_variable_key, :string, default: nil
+
+  defp variable_group(assigns) do
+    ~H"""
+    <%= if Enum.any?(@items) do %>
+      <section class="space-y-3">
+        <div class="flex items-center gap-2 px-1">
+          <h3 class="text-sm font-semibold text-gray-700"><%= @title %></h3>
+          <span class="text-xs text-gray-400"><%= length(@items) %> items</span>
+        </div>
+        <%= for item <- @items do %>
+          <.variable_card item={item} expanded?={@expanded_variable_key == variable_key(item)} />
+        <% end %>
+      </section>
+    <% end %>
+    """
+  end
+
+  attr :item, :map, required: true
+  attr :expanded?, :boolean, required: true
+
+  defp variable_card(assigns) do
+    assigns = assign(assigns, :usage_groups, grouped_variable_usages(assigns.item))
+
+    ~H"""
+    <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <button
+        type="button"
+        phx-click="toggle_variable_detail"
+        phx-value-key={variable_key(@item)}
+        class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50"
+      >
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="truncate text-sm font-medium text-gray-800"><%= @item.name %></span>
+            <span class={scope_badge_class(@item.scope)}><%= scope_label(@item.scope) %></span>
+          </div>
+          <p class="mt-1 text-xs text-gray-400"><%= variable_usage_count_text(@item) %></p>
+        </div>
+        <span class="text-xs font-medium text-slate-400"><%= if @expanded?, do: "Hide", else: "Usage" %></span>
+      </button>
+
+      <%= if @expanded? do %>
+        <div class="border-t border-gray-200 bg-slate-50 px-4 py-3">
+          <%= if Enum.any?(@usage_groups) do %>
+            <div class="space-y-3">
+              <%= for group <- @usage_groups do %>
+                <div>
+                  <div class="mb-2 flex items-center gap-2">
+                    <span class="text-sm font-medium text-slate-700"><%= group.sprite %></span>
+                    <span class="text-xs text-slate-400"><%= if group.type == "stage", do: "Stage", else: "Sprite" %></span>
+                  </div>
+                  <div class="space-y-2">
+                    <%= for usage <- group.usages do %>
+                      <button
+                        type="button"
+                        phx-click="jump_to_variable_usage"
+                        phx-value-sprite={usage.sprite}
+                        phx-value-type={usage.type}
+                        phx-value-detail-kind={usage.detail_kind}
+                        phx-value-detail-id={usage.detail_id}
+                        class="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50"
+                      >
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-2">
+                            <%= for access <- usage.accesses do %>
+                              <span class={access_badge_class(access)}><%= access_label(access) %></span>
+                            <% end %>
+                            <span class="truncate text-xs font-medium text-slate-700"><%= usage.detail_label %></span>
+                          </div>
+                        </div>
+                        <span class="text-xs text-slate-400">Open</span>
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          <% else %>
+            <p class="text-xs italic text-slate-400">No usage found.</p>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp variable_key(item) do
+    [Atom.to_string(item.kind), item.scope, item.sprite || "", item.name]
+    |> Enum.map(&to_string/1)
+    |> Enum.join("::")
+  end
+
+  defp grouped_variable_usages(item) do
+    (item.readers ++ item.writers)
+    |> Enum.group_by(fn ref -> {ref.sprite, ref.type, ref.detail_kind, ref.detail_id, ref.detail_label} end)
+    |> Enum.map(fn {{sprite, type, detail_kind, detail_id, detail_label}, refs} ->
+      %{
+        sprite: sprite,
+        type: type,
+        detail_kind: detail_kind,
+        detail_id: detail_id,
+        detail_label: detail_label,
+        accesses: refs |> Enum.map(& &1.access) |> Enum.uniq() |> Enum.sort()
+      }
+    end)
+    |> Enum.group_by(fn usage -> {usage.sprite, usage.type} end)
+    |> Enum.map(fn {{sprite, type}, usages} ->
+      %{sprite: sprite, type: type, usages: Enum.sort_by(usages, &String.downcase(&1.detail_label))}
+    end)
+    |> Enum.sort_by(fn group -> {group.type != "stage", String.downcase(group.sprite)} end)
+  end
+
+  defp variable_usage_count_text(item) do
+    total = length(item.readers) + length(item.writers)
+    "#{total} usage entries"
+  end
+
+  defp scope_label(:global), do: "Global"
+  defp scope_label(:local), do: "Local"
+
+  defp scope_badge_class(:global), do: "rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700"
+  defp scope_badge_class(:local), do: "rounded-full bg-orange-100 px-2 py-0.5 text-xs text-orange-700"
+
+  defp access_label(:read), do: "読む"
+  defp access_label(:write), do: "書く"
+
+  defp access_badge_class(:read), do: "rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
+  defp access_badge_class(:write), do: "rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700"
 
   # ---- Costumes Panel ----
 
@@ -962,7 +1185,9 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp empty_state(assigns) do
     ~H"""
     <div class="flex flex-col items-center justify-center py-20 text-center">
-      <span class="text-4xl mb-3"><%= @icon %></span>
+      <%= if @icon != "" do %>
+        <span class="text-4xl mb-3"><%= @icon %></span>
+      <% end %>
       <p class="text-gray-400 text-sm"><%= @message %></p>
     </div>
     """
