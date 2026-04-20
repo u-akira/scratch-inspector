@@ -3,3 +3,86 @@
 @import "tailwindcss/utilities";
 
 /* This file is for your main application CSS */
+
+.scratch-detail-panel {
+  @apply max-h-[36rem] overflow-auto rounded-3xl bg-[#eef3f8] p-4 shadow-sm transition-all duration-150 ease-out;
+}
+
+.scratch-block-stack {
+  @apply w-full min-w-0;
+}
+
+.scratch-block-stack-wrapper {
+  @apply max-w-full overflow-x-auto;
+}
+
+.scratch-block {
+  @apply inline-flex min-h-[42px] max-w-full flex-wrap items-center gap-1.5 border border-black/10 px-3 py-2 text-sm font-semibold text-white shadow-[inset_0_-2px_0_rgba(0,0,0,0.18)] transition duration-150 ease-in-out;
+}
+.scratch-block--hat {
+  @apply rounded-t-[1.4rem] rounded-b-lg;
+}
+.scratch-block--c-block {
+  @apply rounded-t-lg rounded-b-md pb-2;
+}
+.scratch-block--cap {
+  @apply rounded-t-lg rounded-b-[1.35rem];
+}
+.scratch-block--stack {
+  @apply rounded-lg;
+}
+
+.scratch-inline-block {
+  @apply inline-flex max-w-full flex-wrap items-center gap-1 px-2 py-1 text-xs font-semibold text-white rounded-full;
+}
+
+.hexagon {
+  @apply rounded-none;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+}
+
+.scratch-slot {
+  @apply inline-flex items-center px-2 py-1 text-xs font-medium transition duration-150 ease-in-out;
+}
+.scratch-slot--boolean {
+  @apply rounded-[1rem] ring-1;
+}
+.scratch-slot--boolean.scratch-slot--literal {
+  @apply bg-[#f7fffb] text-[#17643d] ring-[#8dd8ad];
+}
+.scratch-slot--boolean.scratch-slot--block {
+  @apply bg-[#f7fffb] ring-[#8dd8ad] text-[#0f3d29];
+}
+.scratch-slot--round {
+  @apply rounded-full ring-1 px-3;
+}
+.scratch-slot--round.scratch-slot--literal {
+  @apply rounded-full bg-white text-black ring-slate-300;
+}
+.scratch-slot--round.scratch-slot--block {
+  @apply bg-[#fff7e6]/40 ring-[#ffd27a]/50 text-[#5f4215];
+}
+.scratch-slot--literal {
+  @apply rounded-md bg-white/95 text-slate-700 ring-1 ring-slate-300/70;
+}
+.scratch-slot--block {
+  @apply rounded-md bg-white/20 ring-1 ring-slate-200/30;
+}
+.scratch-block-item-field {
+  @apply inline-flex items-center rounded-lg bg-white/25 px-2 py-1 text-xs font-medium text-white/95 ring-1 ring-white/15;
+}
+.scratch-block-item-label {
+  @apply leading-tight;
+}
+.scratch-block-item-definition-name {
+  @apply inline-flex items-center rounded-full bg-pink-700 px-2 py-1 text-xs font-semibold text-white ring-1 ring-pink-400/50;
+}
+.scratch-block-child-container {
+  @apply ml-5 mt-1.5 w-[calc(100%-1rem)] min-w-[14rem] rounded-b-[1.25rem] bg-slate-950/5 pr-1 ring-1 ring-slate-300/10;
+}
+.scratch-block-child-inner {
+  @apply rounded-2xl border border-slate-300/10 bg-slate-50/80 px-3 py-3;
+}
+.scratch-block-child-label {
+  @apply mb-1 pl-1 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-700;
+}

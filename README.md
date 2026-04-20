@@ -1,5 +1,10 @@
 # Scratch Inspector
 
+> Implementation note:
+> Flow detail data is now resolved by `lib/scratch_inspector_web/live/flow_detail_view_model.ex`.
+> `InspectorLive` keeps UI state, while detail-display resolution is being split into that ViewModel for the staged `scratch-gui` alignment work.
+> Remaining tasks from Phase 3 onward are documented in `docs/scratch_gui_alignment_roadmap.md`.
+
 Scratch の `.sb` / `.sb2` / `.sb3` ファイルを読み込み、スクリプト内の関数呼び出し・イベント・変数参照を可視化する Web アプリケーション。
 
 ## 概要

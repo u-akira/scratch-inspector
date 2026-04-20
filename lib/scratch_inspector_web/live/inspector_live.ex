@@ -1,5 +1,7 @@
 defmodule ScratchInspectorWeb.InspectorLive do
   use ScratchInspectorWeb, :live_view
+  alias ScratchInspectorWeb.FlowDetailViewModel
+  alias ScratchInspectorWeb.Live.BlockLabelItems
 
   @impl true
   def mount(_params, _session, socket) do
@@ -59,8 +61,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
   @impl true
   def handle_event("flow_select_detail", %{"kind" => kind, "id" => id} = params, socket) do
+    target_sprite = Map.get(params, "sprite")
+    target_type = Map.get(params, "type")
+
     socket =
-      case {Map.get(params, "sprite"), Map.get(params, "type")} do
+      case {target_sprite, target_type} do
         {sprite, type} when is_binary(sprite) and is_binary(type) ->
           socket
           |> assign(:selected_sprite, sprite)
@@ -70,12 +75,13 @@ defmodule ScratchInspectorWeb.InspectorLive do
           socket
       end
 
-    current = socket.assigns.flow_detail
+    current = normalize_flow_detail(socket.assigns.flow_detail)
+    next_detail = normalize_flow_detail(%{kind: kind, id: id, sprite: target_sprite, type: target_type})
 
     next =
-      if current && current.kind == kind && current.id == id,
+      if flow_detail_same?(current, next_detail),
         do: nil,
-        else: %{kind: kind, id: id}
+        else: next_detail
 
     {:noreply, assign(socket, :flow_detail, next)}
   end
@@ -93,7 +99,15 @@ defmodule ScratchInspectorWeb.InspectorLive do
      |> assign(:selected_sprite, params["sprite"])
      |> assign(:selected_target_type, params["type"])
      |> assign(:active_tab, :flow)
-     |> assign(:flow_detail, %{kind: params["detail-kind"], id: params["detail-id"]})}
+     |> assign(
+       :flow_detail,
+       normalize_flow_detail(%{
+         kind: params["detail-kind"],
+         id: params["detail-id"],
+         sprite: params["sprite"],
+         type: params["type"]
+       })
+     )}
   end
 
   @impl true
@@ -161,6 +175,31 @@ defmodule ScratchInspectorWeb.InspectorLive do
     end
   end
 
+  defp normalize_flow_detail(nil), do: nil
+
+  defp normalize_flow_detail(detail) when is_map(detail) do
+    %{
+      kind: Map.get(detail, :kind) || Map.get(detail, "kind"),
+      id: Map.get(detail, :id) || Map.get(detail, "id"),
+      sprite: Map.get(detail, :sprite) || Map.get(detail, "sprite"),
+      type: Map.get(detail, :type) || Map.get(detail, "type")
+    }
+    |> then(fn normalized ->
+      if is_binary(normalized.kind) and is_binary(normalized.id), do: normalized, else: nil
+    end)
+  end
+
+  defp normalize_flow_detail(_), do: nil
+
+  defp flow_detail_same?(nil, nil), do: true
+
+  defp flow_detail_same?(left, right) when is_map(left) and is_map(right) do
+    left.kind == right.kind and left.id == right.id and left.sprite == right.sprite and
+      left.type == right.type
+  end
+
+  defp flow_detail_same?(_, _), do: false
+
   # ---- render ----
 
   @impl true
@@ -174,9 +213,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
             <span class="text-2xl">🐱</span>
             <h1 class="text-xl font-bold text-white tracking-tight">Scratch Inspector</h1>
           </div>
+          
           <%= if @project do %>
             <div class="flex items-center gap-3">
-              <span class="text-sm text-white/80 font-medium"><%= @project.name %></span>
+              <span class="text-sm text-white/80 font-medium">{@project.name}</span>
               <button
                 phx-click="reset"
                 class="text-xs bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-full transition"
@@ -187,8 +227,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
           <% end %>
         </div>
       </header>
-
-      <!-- Upload area -->
+      
+    <!-- Upload area -->
       <%= if is_nil(@project) do %>
         <div class="flex items-center justify-center min-h-[calc(100vh-56px)]">
           <div class="w-full max-w-lg px-4">
@@ -205,37 +245,40 @@ defmodule ScratchInspectorWeb.InspectorLive do
               >
                 <%= if @processing do %>
                   <div class="text-5xl mb-4 animate-spin inline-block">⚙️</div>
+                  
                   <p class="text-base font-semibold text-[#4C97FF]">解析中...</p>
                 <% else %>
                   <div class="text-5xl mb-4">🗂️</div>
+                  
                   <p class="text-lg font-semibold text-gray-700 mb-1">
                     Scratch ファイルをドロップ
                   </p>
+                  
                   <p class="text-sm text-gray-400 mb-6">.sb / .sb2 / .sb3 に対応</p>
-
+                  
                   <label class="cursor-pointer inline-block bg-[#4C97FF] hover:bg-[#3d87ef] text-white font-medium px-6 py-2.5 rounded-full transition">
-                    ファイルを選択
-                    <.live_file_input upload={@uploads.scratch_file} class="sr-only" />
+                    ファイルを選択 <.live_file_input upload={@uploads.scratch_file} class="sr-only" />
                   </label>
-
+                  
                   <%= for entry <- @uploads.scratch_file.entries do %>
                     <div class="mt-4 text-sm text-gray-600 flex items-center justify-center gap-2">
-                      <span>📄</span>
-                      <span><%= entry.client_name %></span>
+                      <span>📄</span> <span>{entry.client_name}</span>
                     </div>
+                    
                     <div class="mt-2 w-full bg-gray-200 rounded-full h-2">
                       <div
                         class="bg-[#4C97FF] h-2 rounded-full transition-all duration-300"
                         style={"width: #{entry.progress}%"}
                       />
                     </div>
+                    
                     <%= if entry.done? do %>
                       <p class="mt-1 text-xs text-green-500">アップロード完了</p>
                     <% else %>
-                      <p class="mt-1 text-xs text-gray-400">アップロード中... <%= entry.progress %>%</p>
+                      <p class="mt-1 text-xs text-gray-400">アップロード中... {entry.progress}%</p>
                     <% end %>
                   <% end %>
-
+                  
                   <%= if Enum.any?(@uploads.scratch_file.entries, & &1.done?) do %>
                     <div class="mt-4">
                       <button
@@ -248,18 +291,19 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   <% end %>
                 <% end %>
               </div>
-
+              
               <%= if @upload_error do %>
-                <p class="mt-3 text-sm text-red-500 text-center"><%= @upload_error %></p>
+                <p class="mt-3 text-sm text-red-500 text-center">{@upload_error}</p>
               <% end %>
+              
               <%= for err <- upload_errors(@uploads.scratch_file) do %>
-                <p class="mt-3 text-sm text-red-500 text-center"><%= upload_error_text(err) %></p>
+                <p class="mt-3 text-sm text-red-500 text-center">{upload_error_text(err)}</p>
               <% end %>
             </form>
           </div>
         </div>
-
-      <!-- Main UI -->
+        
+    <!-- Main UI -->
       <% else %>
         <div class="h-[calc(100vh-56px)] flex flex-col overflow-hidden">
           <!-- Sprite thumbnail strip -->
@@ -281,6 +325,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                 <span class="text-[10px] text-gray-600 truncate max-w-[48px]">背景</span>
               </button>
             <% end %>
+            
             <%= for sprite <- @project.sprites do %>
               <button
                 phx-click="select_sprite"
@@ -295,12 +340,12 @@ defmodule ScratchInspectorWeb.InspectorLive do
                 ]}
               >
                 <.sprite_thumbnail sprite={sprite} />
-                <span class="text-[10px] text-gray-600 truncate max-w-[48px]"><%= sprite.name %></span>
+                <span class="text-[10px] text-gray-600 truncate max-w-[48px]">{sprite.name}</span>
               </button>
             <% end %>
           </div>
-
-          <!-- Tabs -->
+          
+    <!-- Tabs -->
           <div class="bg-white border-b border-gray-200 px-4 flex gap-1 pt-2 flex-shrink-0">
             <%= for {tab, label, _icon} <- tabs() do %>
               <button
@@ -314,14 +359,18 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   )
                 ]}
               >
-                <%= label %>
+                {label}
               </button>
             <% end %>
           </div>
-
-          <!-- Tab content -->
+          
+    <!-- Tab content -->
           <div class="flex-1 overflow-y-auto p-6">
-            <% target = if(@project && @selected_sprite, do: current_target(@project, @selected_sprite, @selected_target_type), else: nil) %>
+            <% target =
+              if(@project && @selected_sprite,
+                do: current_target(@project, @selected_sprite, @selected_target_type),
+                else: nil
+              ) %>
             <%= case @active_tab do %>
               <% :flow -> %>
                 <.flow_graph_panel project={@project} target={target} flow_detail={@flow_detail} />
@@ -346,12 +395,13 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
   # ---- sub-components ----
 
-  defp tabs, do: [
-    {:flow,      "フロー",      ""},
-    {:variables, "変数",        ""},
-    {:costumes,  "コスチューム", ""},
-    {:sounds,    "サウンド",    ""}
-  ]
+  defp tabs,
+    do: [
+      {:flow, "フロー", ""},
+      {:variables, "変数", ""},
+      {:costumes, "コスチューム", ""},
+      {:sounds, "サウンド", ""}
+    ]
 
   defp upload_error_text(:too_large), do: "ファイルが大きすぎます（最大 50MB）"
   defp upload_error_text(:not_accepted), do: "対応していないファイル形式です"
@@ -367,13 +417,13 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   defp find_broadcast_receivers(project, msg) do
-    expected_label = "「#{msg}」を受け取ったとき"
     all_targets = Enum.filter([project.stage | project.sprites], & &1)
 
     Enum.flat_map(all_targets, fn target ->
       target.top_scripts
       |> Enum.filter(fn s ->
-        s.hat_opcode == "event_whenbroadcastreceived" && s.hat_label == expected_label
+        s.hat_opcode == "event_whenbroadcastreceived" &&
+          script_receives_broadcast?(s.hat_label, msg)
       end)
       |> Enum.map(fn s -> {target, s} end)
     end)
@@ -386,50 +436,53 @@ defmodule ScratchInspectorWeb.InspectorLive do
     |> Enum.uniq()
   end
 
+  defp script_receives_broadcast?(hat_label, msg)
+       when is_binary(hat_label) and is_binary(msg) and msg != "" do
+    String.contains?(hat_label, msg)
+  end
+
+  defp script_receives_broadcast?(_, _), do: false
+
   attr :project, :map, required: true
   attr :target, :map, default: nil
   attr :flow_detail, :map, default: nil
 
   defp flow_graph_panel(assigns) do
-    {detail_script, detail_title, detail_receivers} =
-      case assigns.flow_detail do
-        %{kind: "script", id: id} when not is_nil(assigns.target) ->
-          script = Enum.find(assigns.target.top_scripts, &(&1.id == id))
-          if script, do: {%{kind: :script, script: script}, script.hat_label, nil}, else: {nil, nil, nil}
-
-        %{kind: "block_def", id: name} when not is_nil(assigns.target) ->
-          cb = Enum.find(assigns.target.custom_blocks, &(&1.name == name))
-          if cb, do: {%{kind: :custom_block, block_def: cb}, name, nil}, else: {nil, nil, nil}
-
-        %{kind: "broadcast", id: msg} ->
-          receivers = find_broadcast_receivers(assigns.project, msg)
-          {nil, "「#{msg}」を受け取るスプライト", receivers}
-
-        _ ->
-          {nil, nil, nil}
-      end
+    detail = FlowDetailViewModel.build(assigns.project, assigns.target, assigns.flow_detail)
 
     assigns =
       assigns
-      |> assign(:detail_script, detail_script)
-      |> assign(:detail_title, detail_title)
-      |> assign(:detail_receivers, detail_receivers)
-      |> assign(:graph_chart, build_flow_mermaid(assigns.project, assigns.target, assigns.flow_detail))
+      |> assign(:detail_script, detail.detail_script)
+      |> assign(:detail_title, detail.detail_title)
+      |> assign(:detail_receivers, detail.detail_receivers)
+      |> assign(
+        :graph_chart,
+        build_flow_mermaid(assigns.project, assigns.target, assigns.flow_detail)
+      )
 
+    flow_graph_panel_content(assigns)
+  end
+
+  defp flow_graph_panel_content(assigns) do
     ~H"""
     <div>
       <%= if @target do %>
         <%= if is_nil(@graph_chart) do %>
-          <.empty_state icon="" message="このスプライトにはスクリプトがありません" />
+          <.empty_state
+            icon=""
+            message="このスプライトにはスクリプトがありません"
+          />
         <% else %>
           <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <div class="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h2 class="text-sm font-semibold text-gray-800">Flow Graph</h2>
+                
                 <p class="text-xs text-gray-500">Click a node to inspect its detail below.</p>
               </div>
-              <span class="text-xs text-gray-400"><%= display_name(@target) %></span>
+               <span class="text-xs text-gray-400">{display_name(@target)}</span>
             </div>
+            
             <div
               id={"flow-chart-#{flow_dom_id(@target)}"}
               phx-hook="MermaidChart"
@@ -446,6 +499,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   >
                     -
                   </button>
+                  
                   <button
                     type="button"
                     data-zoom-action="in"
@@ -454,6 +508,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   >
                     +
                   </button>
+                  
                   <button
                     type="button"
                     data-zoom-action="reset"
@@ -462,27 +517,29 @@ defmodule ScratchInspectorWeb.InspectorLive do
                     100%
                   </button>
                 </div>
-                <span data-zoom-label class="text-xs font-medium text-slate-500">100%</span>
+                 <span data-zoom-label class="text-xs font-medium text-slate-500">100%</span>
               </div>
-              <div
-                data-role="viewport"
-                class="min-h-[360px] overflow-auto px-2 py-4"
-              />
+               <div data-role="viewport" class="min-h-[360px] overflow-auto px-2 py-4" />
             </div>
           </div>
         <% end %>
-
+        
         <%= if @flow_detail && (@detail_script != nil || @detail_receivers != nil) do %>
           <div class="border border-gray-200 rounded-xl overflow-hidden bg-white">
             <div class="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
-              <span class="text-sm font-semibold text-gray-700"><%= @detail_title %></span>
+              <span class="text-sm font-semibold text-gray-700">{@detail_title}</span>
               <button
                 phx-click="flow_select_detail"
                 phx-value-kind={@flow_detail.kind}
                 phx-value-id={@flow_detail.id}
+                phx-value-sprite={@flow_detail.sprite}
+                phx-value-type={@flow_detail.type}
                 class="text-gray-400 hover:text-gray-600 text-lg leading-none"
-              >✕</button>
+              >
+                ✕
+              </button>
             </div>
+            
             <div class="p-4 bg-gray-50">
               <%= if @detail_script do %>
                 <%= if detail_blocks_present?(@detail_script) do %>
@@ -493,17 +550,19 @@ defmodule ScratchInspectorWeb.InspectorLive do
               <% else %>
                 <%= if Enum.any?(@detail_receivers) do %>
                   <div class="space-y-2">
-                    <%= for {sprite, script} <- @detail_receivers do %>
+                    <%= for receiver <- @detail_receivers do %>
                       <button
-                        phx-click="select_sprite"
-                        phx-value-name={sprite.name}
-                        phx-value-type={if sprite.is_stage, do: "stage", else: "sprite"}
+                        phx-click="flow_select_detail"
+                        phx-value-kind={receiver.detail.kind}
+                        phx-value-id={receiver.detail.id}
+                        phx-value-sprite={receiver.detail.sprite}
+                        phx-value-type={receiver.detail.type}
                         class="flex items-center gap-3 w-full bg-white rounded-lg border border-gray-200 px-3 py-2 hover:bg-blue-50 hover:border-blue-200 transition text-left"
                       >
-                        <.sprite_thumbnail sprite={sprite} />
-                        <span class="text-xs font-medium text-gray-700"><%= display_name(sprite) %></span>
-                        <span class="text-xs text-gray-400">→</span>
-                        <span class="text-xs text-gray-600"><%= script.hat_label %></span>
+                        <.sprite_thumbnail sprite={receiver.target} />
+                        <span class="text-xs font-medium text-gray-700">{display_name(receiver.target)}</span>
+                        <span class="text-xs text-gray-400">-></span>
+                        <span class="text-xs text-gray-600">{receiver.script.hat_label}</span>
                       </button>
                     <% end %>
                   </div>
@@ -515,7 +574,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
           </div>
         <% end %>
       <% else %>
-        <.empty_state icon="" message="上のサムネイルからスプライトを選択してください" />
+        <.empty_state
+          icon=""
+          message="上のサムネイルからスプライトを選択してください"
+        />
       <% end %>
     </div>
     """
@@ -539,7 +601,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
         |> Enum.map(fn {script, idx} ->
           %{
             id: "script_#{idx}",
-            detail: %{kind: "script", id: script.id},
+            detail: flow_detail_payload(%{kind: "script", id: script.id}, target),
             label: script.hat_label,
             class: :script,
             script: script
@@ -554,7 +616,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
         |> Enum.map(fn {block_def, idx} ->
           %{
             id: "block_#{idx}",
-            detail: %{kind: "block_def", id: block_def.name},
+            detail: flow_detail_payload(%{kind: "block_def", id: block_def.name}, target),
             label: block_def.name,
             class: :block_def,
             block_def: block_def
@@ -564,8 +626,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
       block_node_ids = Map.new(block_nodes, fn node -> {node.block_def.name, node.id} end)
 
       broadcast_messages =
-        (scripts |> Enum.flat_map(&broadcasts_sent_in_script(&1.blocks))) ++
-          (custom_blocks |> Enum.flat_map(&broadcasts_sent_in_script(&1.code_blocks)))
+        ((scripts |> Enum.flat_map(&broadcasts_sent_in_script(&1.blocks))) ++
+           (custom_blocks |> Enum.flat_map(&broadcasts_sent_in_script(&1.code_blocks))))
         |> Enum.uniq()
 
       broadcast_nodes =
@@ -574,7 +636,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
         |> Enum.map(fn {msg, idx} ->
           %{
             id: "broadcast_#{idx}",
-            detail: %{kind: "broadcast", id: msg},
+            detail: flow_detail_payload(%{kind: "broadcast", id: msg}, target),
             label: msg,
             class: :broadcast,
             message: msg
@@ -608,12 +670,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
             else
               %{
                 id: node_id,
-                detail: %{
-                  kind: "script",
-                  id: script.id,
-                  sprite: receiver_target.name,
-                  type: if(receiver_target.is_stage, do: "stage", else: "sprite")
-                },
+                detail: flow_detail_payload(%{kind: "script", id: script.id}, receiver_target),
                 label: "#{display_name(receiver_target)}<br/>#{script.hat_label}",
                 class: :receiver_script
               }
@@ -656,7 +713,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
           find_broadcast_receivers(project, msg)
           |> Enum.map(fn {receiver_target, script} ->
             to_id =
-              Map.get(receiver_node_ids, {receiver_target.name, receiver_target.is_stage, script.id})
+              Map.get(
+                receiver_node_ids,
+                {receiver_target.name, receiver_target.is_stage, script.id}
+              )
 
             {from_id, to_id}
           end)
@@ -712,8 +772,20 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   defp selected_flow_node?(nil, _detail), do: false
-  defp selected_flow_node?(%{kind: kind, id: id}, %{kind: kind, id: id}), do: true
-  defp selected_flow_node?(_, _), do: false
+  defp selected_flow_node?(current, detail),
+    do: flow_detail_same?(normalize_flow_detail(current), normalize_flow_detail(detail))
+
+  defp flow_detail_payload(detail, target) do
+    normalize_flow_detail(%{
+      kind: detail.kind,
+      id: detail.id,
+      sprite: target.name,
+      type: target_type(target)
+    })
+  end
+
+  defp target_type(%{is_stage: true}), do: "stage"
+  defp target_type(_), do: "sprite"
 
   defp mermaid_payload(detail) do
     detail
@@ -744,50 +816,53 @@ defmodule ScratchInspectorWeb.InspectorLive do
     |> String.replace(~r/[^a-z0-9]+/u, "-")
   end
 
-  defp detail_blocks_present?(%{kind: :script, script: script}), do: Enum.any?(script.render_blocks || [])
-  defp detail_blocks_present?(%{kind: :custom_block, block_def: block_def}), do: Enum.any?(block_def.render_blocks || [])
+  defp detail_blocks_present?(%{header: header, blocks: blocks}),
+    do: not is_nil(header) or Enum.any?(blocks || [])
+
   defp detail_blocks_present?(_), do: false
 
   attr :detail, :map, required: true
 
   defp scratch_script_detail(assigns) do
-    {header_block, blocks} =
-      case assigns.detail do
-        %{kind: :script, script: script} ->
-          header = %{
-            opcode: script.hat_opcode,
-            category: :event,
-            shape: :hat,
-            label: script.hat_label,
-            parts: [],
-            branches: []
-          }
-
-          {header, script.render_blocks || []}
-
-        %{kind: :custom_block, block_def: block_def} ->
-          header = %{
-            opcode: "procedures_definition",
-            category: :custom,
-            shape: :hat,
-            label: block_def.name,
-            parts: [],
-            branches: []
-          }
-
-          {header, block_def.render_blocks || []}
-      end
-
     assigns =
       assigns
-      |> assign(:header_block, header_block)
-      |> assign(:blocks, blocks)
+      |> assign(:header_block, assigns.detail.header)
+      |> assign(:blocks, assigns.detail.blocks || [])
+      |> assign(:custom_args, custom_block_arguments(assigns.detail))
+      |> assign(:custom_signature, custom_block_signature(assigns.detail))
+      |> assign(:header_field_count, length((assigns.detail.header || %{})[:fields] || []))
+      |> assign(:header_input_count, length((assigns.detail.header || %{})[:inputs] || []))
 
     ~H"""
-    <div class="overflow-auto rounded-xl bg-[#eef3f8] p-4">
-      <div class="inline-block min-w-full">
-        <.scratch_block block={@header_block} />
-        <.scratch_stack blocks={@blocks} />
+    <div class="scratch-detail-panel">
+      <div class="min-w-full w-max">
+        <%= if @detail.kind == :custom_block and custom_block_metadata_present?(@custom_args, @header_field_count, @header_input_count) do %>
+          <div class="mb-3 rounded-2xl border border-pink-200/70 bg-pink-50/80 px-3 py-2 text-xs text-pink-900 shadow-sm">
+            <p class="font-semibold">Custom block definition</p>
+            <p class="mt-1 font-mono text-[11px] text-pink-800">{@custom_signature}</p>
+            <p class="mt-1 text-pink-700">
+              {length(@custom_args)} args, {@header_field_count} header fields, {@header_input_count} header inputs
+            </p>
+            <%= if Enum.any?(@custom_args) do %>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <%= for arg <- @custom_args do %>
+                  <span class="inline-flex items-center rounded-full border border-pink-300 bg-white px-2 py-0.5 text-[11px] text-pink-800">
+                    {arg.name}
+                    <%= if is_binary(arg.default) and arg.default != "" do %>
+                      <span class="ml-1 text-pink-500">= {arg.default}</span>
+                    <% end %>
+                  </span>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+        <%= if @header_block do %>
+          <.scratch_block block={@header_block} />
+        <% end %>
+        <div class="scratch-block-stack-wrapper">
+          <.scratch_stack blocks={@blocks} />
+        </div>
       </div>
     </div>
     """
@@ -797,12 +872,16 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
   defp scratch_stack(assigns) do
     ~H"""
-    <div class="space-y-1">
+    <div class="scratch-block-stack">
       <%= for block <- @blocks do %>
         <.scratch_block block={block} />
       <% end %>
     </div>
     """
+  end
+
+  defp custom_block_metadata_present?(custom_args, header_field_count, header_input_count) do
+    Enum.any?(custom_args) or header_field_count > 0 or header_input_count > 0
   end
 
   attr :block, :map, required: true
@@ -812,42 +891,62 @@ defmodule ScratchInspectorWeb.InspectorLive do
       assigns
       |> assign(:category_class, scratch_category_class(assigns.block.category))
       |> assign(:shape_class, scratch_shape_class(assigns.block.shape))
-      |> assign(:display_label, detail_block_label(assigns.block.label))
+      |> assign(:items, scratch_block_items(assigns.block))
+      |> assign(:child_container_class, scratch_child_container_class(assigns.block.shape))
 
     ~H"""
-    <div class="mb-1">
+    <div class="mb-0.5 flex flex-col items-start w-full min-w-0">
       <div class={[
-        "inline-flex min-h-[38px] max-w-full items-center gap-1 px-3 py-2 text-sm font-semibold text-white shadow-[inset_0_-2px_0_rgba(0,0,0,0.18)]",
+        "scratch-block",
         @category_class,
         @shape_class
       ]}>
-        <span class="leading-tight"><%= @display_label %></span>
-        <%= for part <- @block.parts do %>
-          <.scratch_part part={part} />
+        <%= for item <- @items do %>
+          <.scratch_block_item item={item} />
         <% end %>
       </div>
 
-      <%= for branch <- @block.branches do %>
-        <div class="ml-6 mt-1 rounded-l-2xl border-l-4 border-white/80 pl-3">
-          <.scratch_stack blocks={branch.blocks} />
+      <%= if Enum.any?(@block.children || []) do %>
+        <div class={@child_container_class}>
+          <%= for child <- @block.children do %>
+            <div class="mb-2 last:mb-0">
+              <%= if child_name = scratch_child_name(child.name) do %>
+                <div class="scratch-block-child-label">
+                  {child_name}
+                </div>
+              <% end %>
+              <div class="scratch-block-child-inner">
+                <.scratch_stack blocks={child.blocks} />
+              </div>
+            </div>
+          <% end %>
         </div>
       <% end %>
     </div>
     """
   end
 
-  attr :part, :map, required: true
+  attr :item, :map, required: true
 
-  defp scratch_part(assigns) do
+  defp scratch_block_item(assigns) do
+    assigns = assign(assigns, :item_class, scratch_block_item_class(assigns.item))
+
     ~H"""
-    <%= if is_map(@part.value) and @part.value.kind == :block do %>
-      <span class={["inline-flex items-center", slot_shell_class(@part.slot)]}>
-        <.scratch_inline_block block={@part.value.block} />
-      </span>
-    <% else %>
-      <span class={["inline-flex items-center px-2 py-0.5 text-xs font-medium text-slate-700", slot_shell_class(@part.slot)]}>
-        <%= @part.value %>
-      </span>
+    <%= case @item.kind do %>
+      <% :label -> %>
+        <span class={@item_class}>{@item.value}</span>
+      <% :definition_name -> %>
+        <span class={@item_class}>{@item.value}</span>
+      <% :field -> %>
+        <span class={@item_class}>{@item.value}</span>
+      <% :input when is_map(@item.value) and @item.value.kind == :block -> %>
+        <span class={@item_class}>
+          <.scratch_inline_block block={@item.value.block} />
+        </span>
+      <% :input -> %>
+        <span class={@item_class}>
+          {scratch_input_text(@item.value)}
+        </span>
     <% end %>
     """
   end
@@ -859,25 +958,88 @@ defmodule ScratchInspectorWeb.InspectorLive do
       assigns
       |> assign(:category_class, scratch_category_class(assigns.block.category))
       |> assign(:shape_class, inline_shape_class(assigns.block.shape))
-      |> assign(:display_label, detail_block_label(assigns.block.label))
+      |> assign(:items, scratch_block_items(assigns.block))
 
     ~H"""
     <span class={[
-      "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-white",
+      "scratch-inline-block",
       @category_class,
       @shape_class
     ]}>
-      <span><%= @display_label %></span>
-      <%= for part <- @block.parts do %>
-        <.scratch_part part={part} />
+      <%= for item <- @items do %>
+        <.scratch_block_item item={item} />
       <% end %>
     </span>
     """
   end
 
+  defp scratch_block_item_class(%{kind: :label}), do: "scratch-block-item-label"
+  defp scratch_block_item_class(%{kind: :definition_name}), do: "scratch-block-item-definition-name"
+  defp scratch_block_item_class(%{kind: :field}), do: "scratch-block-item-field"
+  defp scratch_block_item_class(%{kind: :input, value: %{kind: :block}, slot: slot}),
+    do: scratch_slot_class(slot, :block)
+
+  defp scratch_block_item_class(%{kind: :input, slot: slot}),
+    do: scratch_slot_class(slot, :literal)
+
+  defp scratch_slot_class(:boolean, :literal),
+    do: "scratch-slot scratch-slot--boolean scratch-slot--literal"
+
+  defp scratch_slot_class(:boolean, :block),
+    do: "scratch-slot scratch-slot--boolean scratch-slot--block"
+
+  defp scratch_slot_class(:round, :literal),
+    do: "scratch-slot scratch-slot--round scratch-slot--literal"
+
+  defp scratch_slot_class(:round, :block),
+    do: "scratch-slot scratch-slot--round scratch-slot--block"
+
+  defp scratch_slot_class(_, :literal),
+    do: "scratch-slot scratch-slot--literal"
+
+  defp scratch_slot_class(_, :block),
+    do: "scratch-slot scratch-slot--block"
+
+  defp scratch_block_items(%{opcode: "procedures_definition"} = block) do
+    label_items =
+      case detail_block_label(block.label) do
+        label when is_binary(label) and label != "" ->
+          [
+            %{kind: :label, value: "定義 "},
+            %{kind: :definition_name, value: label}
+          ]
+
+        _ ->
+          [%{kind: :label, value: "定義"}]
+      end
+
+    label_items
+  end
+
+  defp scratch_block_items(%{opcode: "data_setvariableto"} = block) do
+    label = detail_block_label(block.label)
+    if is_binary(label) and label != "" do
+      BlockLabelItems.parse(label, block.fields || %{}, block.inputs || %{})
+    else
+      []
+    end
+  end
+
+  defp scratch_block_items(block) do
+    label = detail_block_label(block.label)
+    if is_binary(label) and label != "" do
+      BlockLabelItems.parse(label, block.fields || %{}, block.inputs || %{})
+    else
+      []
+    end
+  end
+
+  defp find_custom_input(inputs, name) do
+    Enum.find(inputs || [], fn input -> input.name == name end)
+  end
+
   defp detail_block_label(label) when is_binary(label) do
     label
-    |> String.replace(~r/^[^\p{L}\p{N}]+/u, "")
     |> String.trim_leading()
   end
 
@@ -895,16 +1057,114 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp scratch_category_class(:pen), do: "bg-[#0FBD8C]"
   defp scratch_category_class(_), do: "bg-slate-500"
 
-  defp scratch_shape_class(:hat), do: "rounded-t-[1.35rem] rounded-b-lg"
-  defp scratch_shape_class(:c_block), do: "rounded-lg"
-  defp scratch_shape_class(:cap), do: "rounded-t-lg rounded-b-[1.25rem]"
+  defp scratch_shape_class(:hat), do: "rounded-t-[1.4rem] rounded-b-lg"
+  defp scratch_shape_class(:c_block), do: "rounded-t-lg rounded-b-md pb-2"
+  defp scratch_shape_class(:cap), do: "rounded-t-lg rounded-b-[1.35rem]"
+  defp scratch_shape_class(:reporter_boolean), do: "hexagon"
+  defp scratch_shape_class(:reporter_round), do: "rounded-full"
   defp scratch_shape_class(_), do: "rounded-lg"
 
-  defp inline_shape_class(:boolean), do: "rounded-[1rem]"
+  defp inline_shape_class(:boolean), do: "hexagon"
+  defp inline_shape_class(:reporter_boolean), do: "hexagon"
+  defp inline_shape_class(:round), do: "rounded-full"
+  defp inline_shape_class(:reporter_round), do: "rounded-full"
   defp inline_shape_class(_), do: "rounded-md"
 
-  defp slot_shell_class(:boolean), do: "rounded-[1rem] bg-white/95"
-  defp slot_shell_class(_), do: "rounded-md bg-white/95"
+  defp slot_shell_class(:boolean, :literal),
+    do: "rounded-[1rem] bg-[#f7fffb] text-[#17643d] ring-1 ring-[#8dd8ad]"
+
+  defp slot_shell_class(:boolean, :block),
+    do: "rounded-[1rem] bg-[#f7fffb] ring-1 ring-[#8dd8ad]"
+
+  defp slot_shell_class(:round, :literal),
+    do: "rounded-[1rem] bg-[#fff7e6] text-[#7a4d00] ring-1 ring-[#ffd27a]"
+
+  defp slot_shell_class(:round, :block),
+    do: "rounded-[1rem] bg-[#fff7e6] ring-1 ring-[#ffd27a]"
+
+  defp slot_shell_class(_, :literal),
+    do: "rounded-md bg-white/95 text-slate-700 ring-1 ring-slate-300/70"
+
+  defp slot_shell_class(_, :block),
+    do: "rounded-md bg-white/95 ring-1 ring-slate-300/70"
+
+  defp scratch_child_container_class(:c_block),
+    do: "ml-5 mt-1.5 w-[calc(100%-1rem)] min-w-[14rem] rounded-b-[1.25rem] bg-inherit pr-1"
+
+  defp scratch_child_container_class(_),
+    do: "ml-5 mt-1.5 w-[calc(100%-1rem)] min-w-[14rem]"
+
+  defp scratch_child_name("SUBSTACK"), do: nil
+  defp scratch_child_name("SUBSTACK2"), do: "else"
+  defp scratch_child_name(_), do: nil
+
+  defp custom_block_signature(%{kind: :custom_block, header: header}) when is_map(header) do
+    mutation = Map.get(header, :mutation, %{})
+    Map.get(mutation, "proccode") || Map.get(header, :label) || "custom block"
+  end
+
+  defp custom_block_signature(_), do: "custom block"
+
+  defp custom_block_arguments(%{kind: :custom_block, header: header}) when is_map(header) do
+    mutation = Map.get(header, :mutation, %{})
+    names = mutation_array(mutation, "argumentnames")
+    defaults = mutation_array(mutation, "argumentdefaults")
+    fields = Map.get(header, :fields, [])
+    inputs = Map.get(header, :inputs, [])
+
+    case names do
+      [] ->
+        fallback_custom_args(fields, inputs)
+
+      _ ->
+        names
+        |> Enum.with_index()
+        |> Enum.map(fn {name, index} ->
+          %{
+            name: normalize_custom_arg_name(name, index),
+            default: Enum.at(defaults, index)
+          }
+        end)
+    end
+  end
+
+  defp custom_block_arguments(_), do: []
+
+  defp fallback_custom_args(fields, inputs) do
+    field_args =
+      Enum.map(fields, fn field ->
+        %{name: "field:#{field.name}", default: field.value}
+      end)
+
+    input_args =
+      Enum.map(inputs, fn input ->
+        %{
+          name: "input:#{input.name}",
+          default: scratch_input_text(input.value)
+        }
+      end)
+
+    field_args ++ input_args
+  end
+
+  defp mutation_array(mutation, key) when is_map(mutation) do
+    case Map.get(mutation, key) do
+      value when is_list(value) ->
+        Enum.map(value, &to_string/1)
+
+      value when is_binary(value) ->
+        case Jason.decode(value) do
+          {:ok, list} when is_list(list) -> Enum.map(list, &to_string/1)
+          _ -> []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp normalize_custom_arg_name(name, _index) when is_binary(name) and name != "", do: name
+  defp normalize_custom_arg_name(_name, index), do: "arg#{index + 1}"
 
   # ---- Variables Panel ----
 
@@ -920,6 +1180,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
         Enum.filter(assigns.project.variables, &(&1.scope == :global))
       else
         sprite_name = assigns.target && assigns.target.name
+
         assigns.project.variables
         |> Enum.filter(&(&1.scope == :local && &1.sprite == sprite_name))
       end
@@ -932,20 +1193,31 @@ defmodule ScratchInspectorWeb.InspectorLive do
     ~H"""
     <div>
       <h2 class="text-base font-semibold text-gray-700 mb-4">
-        変数参照マップ
-        <span class="text-xs text-gray-400 font-normal ml-2">使用中の変数のみ表示</span>
+        変数参照マップ <span class="text-xs text-gray-400 font-normal ml-2">使用中の変数のみ表示</span>
       </h2>
+      
       <%= if Enum.any?(@variables) or Enum.any?(@lists) do %>
         <div class="space-y-3">
-          <.variable_group title="変数" items={@variables} expanded_variable_key={@expanded_variable_key} />
-          <.variable_group title="リスト" items={@lists} expanded_variable_key={@expanded_variable_key} />
+          <.variable_group
+            title="変数"
+            items={@variables}
+            expanded_variable_key={@expanded_variable_key}
+          />
+          <.variable_group
+            title="リスト"
+            items={@lists}
+            expanded_variable_key={@expanded_variable_key}
+          />
         </div>
       <% else %>
-        <.empty_state icon="" message={
-          if @selected_target_type == "stage",
-            do: "使用中のグローバル変数が見つかりませんでした",
-            else: "このスプライトにローカル変数はありません"
-        } />
+        <.empty_state
+          icon=""
+          message={
+            if @selected_target_type == "stage",
+              do: "使用中のグローバル変数が見つかりませんでした",
+              else: "このスプライトにローカル変数はありません"
+          }
+        />
       <% end %>
     </div>
     """
@@ -960,9 +1232,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
     <%= if Enum.any?(@items) do %>
       <section class="space-y-3">
         <div class="flex items-center gap-2 px-1">
-          <h3 class="text-sm font-semibold text-gray-700"><%= @title %></h3>
-          <span class="text-xs text-gray-400"><%= length(@items) %> items</span>
+          <h3 class="text-sm font-semibold text-gray-700">{@title}</h3>
+           <span class="text-xs text-gray-400">{length(@items)} items</span>
         </div>
+        
         <%= for item <- @items do %>
           <.variable_card item={item} expanded?={@expanded_variable_key == variable_key(item)} />
         <% end %>
@@ -987,14 +1260,18 @@ defmodule ScratchInspectorWeb.InspectorLive do
       >
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <span class="truncate text-sm font-medium text-gray-800"><%= @item.name %></span>
-            <span class={scope_badge_class(@item.scope)}><%= scope_label(@item.scope) %></span>
+            <span class="truncate text-sm font-medium text-gray-800">{@item.name}</span>
+            <span class={scope_badge_class(@item.scope)}>{scope_label(@item.scope)}</span>
           </div>
-          <p class="mt-1 text-xs text-gray-400"><%= variable_usage_count_text(@item) %></p>
+          
+          <p class="mt-1 text-xs text-gray-400">{variable_usage_count_text(@item)}</p>
         </div>
-        <span class="text-xs font-medium text-slate-400"><%= if @expanded?, do: "Hide", else: "Usage" %></span>
+        
+        <span class="text-xs font-medium text-slate-400">
+          {if @expanded?, do: "Hide", else: "Usage"}
+        </span>
       </button>
-
+      
       <%= if @expanded? do %>
         <div class="border-t border-gray-200 bg-slate-50 px-4 py-3">
           <%= if Enum.any?(@usage_groups) do %>
@@ -1002,9 +1279,12 @@ defmodule ScratchInspectorWeb.InspectorLive do
               <%= for group <- @usage_groups do %>
                 <div>
                   <div class="mb-2 flex items-center gap-2">
-                    <span class="text-sm font-medium text-slate-700"><%= group.sprite %></span>
-                    <span class="text-xs text-slate-400"><%= if group.type == "stage", do: "Stage", else: "Sprite" %></span>
+                    <span class="text-sm font-medium text-slate-700">{group.sprite}</span>
+                    <span class="text-xs text-slate-400">
+                      {if group.type == "stage", do: "Stage", else: "Sprite"}
+                    </span>
                   </div>
+                  
                   <div class="space-y-2">
                     <%= for usage <- group.usages do %>
                       <button
@@ -1019,12 +1299,15 @@ defmodule ScratchInspectorWeb.InspectorLive do
                         <div class="min-w-0">
                           <div class="flex items-center gap-2">
                             <%= for access <- usage.accesses do %>
-                              <span class={access_badge_class(access)}><%= access_label(access) %></span>
+                              <span class={access_badge_class(access)}>{access_label(access)}</span>
                             <% end %>
-                            <span class="truncate text-xs font-medium text-slate-700"><%= usage.detail_label %></span>
+                            
+                            <span class="truncate text-xs font-medium text-slate-700">
+                              {usage.detail_label}
+                            </span>
                           </div>
                         </div>
-                        <span class="text-xs text-slate-400">Open</span>
+                         <span class="text-xs text-slate-400">Open</span>
                       </button>
                     <% end %>
                   </div>
@@ -1048,7 +1331,9 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
   defp grouped_variable_usages(item) do
     (item.readers ++ item.writers)
-    |> Enum.group_by(fn ref -> {ref.sprite, ref.type, ref.detail_kind, ref.detail_id, ref.detail_label} end)
+    |> Enum.group_by(fn ref ->
+      {ref.sprite, ref.type, ref.detail_kind, ref.detail_id, ref.detail_label}
+    end)
     |> Enum.map(fn {{sprite, type, detail_kind, detail_id, detail_label}, refs} ->
       %{
         sprite: sprite,
@@ -1061,7 +1346,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
     end)
     |> Enum.group_by(fn usage -> {usage.sprite, usage.type} end)
     |> Enum.map(fn {{sprite, type}, usages} ->
-      %{sprite: sprite, type: type, usages: Enum.sort_by(usages, &String.downcase(&1.detail_label))}
+      %{
+        sprite: sprite,
+        type: type,
+        usages: Enum.sort_by(usages, &String.downcase(&1.detail_label))
+      }
     end)
     |> Enum.sort_by(fn group -> {group.type != "stage", String.downcase(group.sprite)} end)
   end
@@ -1074,14 +1363,20 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp scope_label(:global), do: "Global"
   defp scope_label(:local), do: "Local"
 
-  defp scope_badge_class(:global), do: "rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700"
-  defp scope_badge_class(:local), do: "rounded-full bg-orange-100 px-2 py-0.5 text-xs text-orange-700"
+  defp scope_badge_class(:global),
+    do: "rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700"
+
+  defp scope_badge_class(:local),
+    do: "rounded-full bg-orange-100 px-2 py-0.5 text-xs text-orange-700"
 
   defp access_label(:read), do: "読む"
   defp access_label(:write), do: "書く"
 
-  defp access_badge_class(:read), do: "rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
-  defp access_badge_class(:write), do: "rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700"
+  defp access_badge_class(:read),
+    do: "rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
+
+  defp access_badge_class(:write),
+    do: "rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700"
 
   # ---- Costumes Panel ----
 
@@ -1093,15 +1388,18 @@ defmodule ScratchInspectorWeb.InspectorLive do
       <h2 class="text-base font-semibold text-gray-700 mb-4">
         コスチューム
         <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= display_name(@target) %></span>
+          <span class="text-gray-400 font-normal">— {display_name(@target)}</span>
         <% end %>
       </h2>
+      
       <%= if @target && Enum.any?(@target.costumes) do %>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
           <%= for {costume, idx} <- Enum.with_index(@target.costumes) do %>
             <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div class="aspect-square bg-gray-50 flex items-center justify-center p-2 border-b border-gray-100"
-                   style="background-image: linear-gradient(45deg, #f0f0f0 25%, transparent 25%), linear-gradient(-45deg, #f0f0f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f0f0f0 75%), linear-gradient(-45deg, transparent 75%, #f0f0f0 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0px;">
+              <div
+                class="aspect-square bg-gray-50 flex items-center justify-center p-2 border-b border-gray-100"
+                style="background-image: linear-gradient(45deg, #f0f0f0 25%, transparent 25%), linear-gradient(-45deg, #f0f0f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f0f0f0 75%), linear-gradient(-45deg, transparent 75%, #f0f0f0 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0px;"
+              >
                 <%= if costume.base64 do %>
                   <img
                     src={"data:#{costume.mime};base64,#{costume.base64}"}
@@ -1112,9 +1410,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   <span class="text-3xl text-gray-300">🖼️</span>
                 <% end %>
               </div>
+              
               <div class="p-2 text-center">
-                <p class="text-xs font-medium text-gray-700 truncate"><%= costume.name %></p>
-                <p class="text-[10px] text-gray-400 uppercase"><%= costume.data_format %> #<%= idx + 1 %></p>
+                <p class="text-xs font-medium text-gray-700 truncate">{costume.name}</p>
+                
+                <p class="text-[10px] text-gray-400 uppercase">{costume.data_format} #{idx + 1}</p>
               </div>
             </div>
           <% end %>
@@ -1136,9 +1436,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
       <h2 class="text-base font-semibold text-gray-700 mb-4">
         サウンド
         <%= if @target do %>
-          <span class="text-gray-400 font-normal">— <%= display_name(@target) %></span>
+          <span class="text-gray-400 font-normal">— {display_name(@target)}</span>
         <% end %>
       </h2>
+      
       <%= if @target && Enum.any?(@target.sounds) do %>
         <div class="space-y-3">
           <%= for sound <- @target.sounds do %>
@@ -1146,18 +1447,21 @@ defmodule ScratchInspectorWeb.InspectorLive do
               <div class="flex items-center gap-3">
                 <span class="text-2xl">🔊</span>
                 <div class="flex-1 min-w-0">
-                  <p class="font-medium text-gray-800 text-sm"><%= sound.name %></p>
+                  <p class="font-medium text-gray-800 text-sm">{sound.name}</p>
+                  
                   <p class="text-[10px] text-gray-400 uppercase mt-0.5">
-                    <%= sound.data_format %>
+                    {sound.data_format}
                     <%= if sound.rate do %>
-                      · <%= div(sound.rate, 1000) %>kHz
+                      · {div(sound.rate, 1000)}kHz
                     <% end %>
+                    
                     <%= if sound.sample_count && sound.rate do %>
-                      · <%= Float.round(sound.sample_count / sound.rate, 1) %>秒
+                      · {Float.round(sound.sample_count / sound.rate, 1)}秒
                     <% end %>
                   </p>
                 </div>
               </div>
+              
               <%= if sound.base64 do %>
                 <div class="mt-3">
                   <audio controls class="w-full h-8" preload="none">
@@ -1186,9 +1490,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
     ~H"""
     <div class="flex flex-col items-center justify-center py-20 text-center">
       <%= if @icon != "" do %>
-        <span class="text-4xl mb-3"><%= @icon %></span>
+        <span class="text-4xl mb-3">{@icon}</span>
       <% end %>
-      <p class="text-gray-400 text-sm"><%= @message %></p>
+      
+      <p class="text-gray-400 text-sm">{@message}</p>
     </div>
     """
   end
@@ -1212,7 +1517,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
         class="w-8 h-8 object-contain flex-shrink-0 rounded"
       />
     <% else %>
-      <span class="flex-shrink-0"><%= if @sprite.is_stage, do: "🎭", else: "🐱" %></span>
+      <span class="flex-shrink-0">{if @sprite.is_stage, do: "🎭", else: "🐱"}</span>
     <% end %>
     """
   end
@@ -1232,4 +1537,17 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
   defp event_hat?(opcode), do: opcode in @event_hat_opcodes
 
+  defp scratch_input_text(value) do
+    case value do
+      nil -> ""
+      %{kind: :literal, value: literal} when is_binary(literal) -> literal
+      %{kind: :literal, value: literal} when is_number(literal) -> to_string(literal)
+      %{"kind" => "literal", "value" => literal} when is_binary(literal) -> literal
+      %{"kind" => "literal", "value" => literal} when is_number(literal) -> to_string(literal)
+      value when is_binary(value) -> value
+      value when is_number(value) -> to_string(value)
+      value when is_atom(value) -> to_string(value)
+      _ -> inspect(value)
+    end
+  end
 end

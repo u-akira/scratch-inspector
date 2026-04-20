@@ -5,6 +5,139 @@ defmodule ScratchInspector.Parser do
   .sb は未対応（Scratch 1.x バイナリ形式）。
   """
 
+  # ---- Block labels (Japanese translations) ----
+
+  defp opcode_label("looks_seteffectto"), do: "[EFFECT] の効果を [VALUE] にする"
+  defp opcode_label("operator_random"), do: "[FROM] から [TO] までの乱数"
+  defp opcode_label("data_setvariableto"), do: "[VARIABLE] を [VALUE] にする"
+  defp opcode_label("data_changevariableby"), do: "[VARIABLE] を [VALUE] ずつ変える"
+  defp opcode_label("data_showvariable"), do: "[VARIABLE] を表示する"
+  defp opcode_label("data_hidevariable"), do: "[VARIABLE] を隠す"
+  defp opcode_label("control_if"), do: "もし [CONDITION] なら"
+  defp opcode_label("control_if_else"), do: "もし [CONDITION] なら"
+  defp opcode_label("control_repeat"), do: "[TIMES] 回繰り返す"
+  defp opcode_label("control_forever"), do: "ずっと"
+  defp opcode_label("control_stop"), do: "[STOP_OPTION] を止める"
+  defp opcode_label("event_whenflagclicked"), do: "緑の旗がクリックされたとき"
+  defp opcode_label("event_whenkeypressed"), do: "[KEY_OPTION] キーが押されたとき"
+  defp opcode_label("event_whenthisspriteclicked"), do: "このスプライトがクリックされたとき"
+  defp opcode_label("event_whenbackdropswitchesto"), do: "背景が [BACKDROP] になったとき"
+  defp opcode_label("event_whengreaterthan"), do: "[WHENGREATERTHANMENU] > [VALUE]"
+  defp opcode_label("motion_movesteps"), do: "[STEPS] 歩動かす"
+  defp opcode_label("motion_turnright"), do: "時計回りに [DEGREES] 度回す"
+  defp opcode_label("motion_turnleft"), do: "反時計回りに [DEGREES] 度回す"
+  defp opcode_label("motion_goto"), do: "[TO] へ行く"
+  defp opcode_label("motion_gotoxy"), do: "x: [X] y: [Y] へ行く"
+  defp opcode_label("motion_glideto"), do: "[SECS] 秒で [TO] へ行く"
+  defp opcode_label("motion_glidesecstoxy"), do: "[SECS] 秒で x: [X] y: [Y] へ行く"
+  defp opcode_label("motion_pointindirection"), do: "[DIRECTION] 度に向ける"
+  defp opcode_label("motion_pointtowards"), do: "[TOWARDS] へ向ける"
+  defp opcode_label("motion_changexby"), do: "x座標を [DX] ずつ変える"
+  defp opcode_label("motion_setx"), do: "x座標を [X] にする"
+  defp opcode_label("motion_changeyby"), do: "y座標を [DY] ずつ変える"
+  defp opcode_label("motion_sety"), do: "y座標を [Y] にする"
+  defp opcode_label("motion_ifonedgebounce"), do: "もし端に着いたら、跳ね返る"
+  defp opcode_label("motion_setrotationstyle"), do: "回転方法を [STYLE] にする"
+  defp opcode_label("looks_sayforsecs"), do: "[MESSAGE] と [SECS] 秒言う"
+  defp opcode_label("looks_say"), do: "[MESSAGE] と言う"
+  defp opcode_label("looks_thinkforsecs"), do: "[MESSAGE] と [SECS] 秒考える"
+  defp opcode_label("looks_think"), do: "[MESSAGE] を考える"
+  defp opcode_label("looks_show"), do: "表示する"
+  defp opcode_label("looks_hide"), do: "隠す"
+  defp opcode_label("looks_changeeffectby"), do: "[EFFECT] の効果を [CHANGE] ずつ変える"
+  defp opcode_label("looks_setEffectTo"), do: "[EFFECT] の効果を [VALUE] にする"
+  defp opcode_label("looks_cleargraphiceffects"), do: "画像効果をなくす"
+  defp opcode_label("looks_changesizeby"), do: "大きさを [CHANGE] ずつ変える"
+  defp opcode_label("looks_setsizeto"), do: "大きさを [CHANGE] %にする"
+  defp opcode_label("looks_gotofrontback"), do: "[FRONT_BACK] へ移動する"
+  defp opcode_label("looks_goforwardbackwardlayers"), do: "[FORWARD_BACKWARD] [NUM] 層移動する"
+  defp opcode_label("looks_costumenumbername"), do: "コスチュームの [NUMBER_NAME]"
+  defp opcode_label("looks_costume"), do: "コスチュームを [COSTUME] にする"
+  defp opcode_label("looks_switchcostumeto"), do: "コスチュームを [COSTUME] にする"
+  defp opcode_label("looks_nextcostume"), do: "次のコスチュームにする"
+  defp opcode_label("looks_switchbackdropto"), do: "背景を [BACKDROP] にする"
+  defp opcode_label("looks_switchbackdroptoandwait"), do: "背景を [BACKDROP] にする"
+  defp opcode_label("looks_nextbackdrop"), do: "次の背景にする"
+  defp opcode_label("sound_playuntildone"), do: "[SOUND_MENU] を鳴らす"
+  defp opcode_label("sound_play"), do: "[SOUND_MENU] を鳴らす"
+  defp opcode_label("sound_stopallsounds"), do: "すべての音を止める"
+  defp opcode_label("sound_changeeffectby"), do: "[EFFECT] の効果を [VALUE] ずつ変える"
+  defp opcode_label("sound_seteffectto"), do: "[EFFECT] の効果を [VALUE] にする"
+  defp opcode_label("sound_cleareffects"), do: "音の効果をなくす"
+  defp opcode_label("sound_changevolumeby"), do: "音量を [VOLUME] ずつ変える"
+  defp opcode_label("sound_setvolumeto"), do: "音量を [VOLUME] %にする"
+  defp opcode_label("sound_volume"), do: "音量"
+  defp opcode_label("event_broadcast"), do: "[BROADCAST_INPUT] を送る"
+  defp opcode_label("event_broadcastandwait"), do: "[BROADCAST_INPUT] を送って待つ"
+  defp opcode_label("control_wait"), do: "[DURATION] 秒待つ"
+  defp opcode_label("control_repeat_until"), do: "[CONDITION] まで繰り返す"
+  defp opcode_label("control_while"), do: "[CONDITION] の間繰り返す"
+  defp opcode_label("control_for_each"), do: "[VARIABLE] を [VALUE] から [VALUE2] まで使う"
+  defp opcode_label("control_start_as_clone"), do: "クローンされたとき"
+  defp opcode_label("control_create_clone_of"), do: "[CLONE_OPTION] のクローンを作る"
+  defp opcode_label("control_delete_this_clone"), do: "このクローンを削除する"
+  defp opcode_label("sensing_touchingobject"), do: "[TOUCHINGOBJECTMENU] に触れた"
+  defp opcode_label("sensing_touchingcolor"), do: "[COLOR] 色に触れた"
+  defp opcode_label("sensing_coloristouchingcolor"), do: "[COLOR] 色が [COLOR2] 色に触れた"
+  defp opcode_label("sensing_distanceto"), do: "[DISTANCETOMENU] までの距離"
+  defp opcode_label("sensing_askandwait"), do: "[QUESTION] と聞いて待つ"
+  defp opcode_label("sensing_answer"), do: "答え"
+  defp opcode_label("sensing_keypressed"), do: "[KEY_OPTION] キーが押された"
+  defp opcode_label("sensing_mousedown"), do: "マウスが押された"
+  defp opcode_label("sensing_mousex"), do: "マウスのx座標"
+  defp opcode_label("sensing_mousey"), do: "マウスのy座標"
+  defp opcode_label("sensing_setdragmode"), do: "ドラッグモードを [DRAG_MODE] にする"
+  defp opcode_label("sensing_loudness"), do: "音量"
+  defp opcode_label("sensing_timer"), do: "タイマー"
+  defp opcode_label("sensing_resettimer"), do: "タイマーをリセット"
+  defp opcode_label("sensing_of"), do: "[OBJECT] の [PROPERTY]"
+  defp opcode_label("sensing_current"), do: "現在の [CURRENTMENU]"
+  defp opcode_label("sensing_dayssince2000"), do: "2000年からの日数"
+  defp opcode_label("sensing_username"), do: "ユーザー名"
+  defp opcode_label("operator_add"), do: "[NUM1] + [NUM2]"
+  defp opcode_label("operator_subtract"), do: "[NUM1] - [NUM2]"
+  defp opcode_label("operator_multiply"), do: "[NUM1] * [NUM2]"
+  defp opcode_label("operator_divide"), do: "[NUM1] / [NUM2]"
+  defp opcode_label("operator_random"), do: "[FROM] から [TO] までの乱数"
+  defp opcode_label("operator_gt"), do: "[OPERAND1] > [OPERAND2]"
+  defp opcode_label("operator_lt"), do: "[OPERAND1] < [OPERAND2]"
+  defp opcode_label("operator_equals"), do: "[OPERAND1] = [OPERAND2]"
+  defp opcode_label("operator_and"), do: "[OPERAND1] かつ [OPERAND2]"
+  defp opcode_label("operator_or"), do: "[OPERAND1] または [OPERAND2]"
+  defp opcode_label("operator_not"), do: "[OPERAND] ではない"
+  defp opcode_label("operator_join"), do: "[STRING1] と [STRING2]"
+  defp opcode_label("operator_letter_of"), do: "[STRING] の [LETTER] 番目の文字"
+  defp opcode_label("operator_length"), do: "[STRING] の長さ"
+  defp opcode_label("operator_contains"), do: "[STRING1] に [STRING2] が含まれる"
+  defp opcode_label("operator_mod"), do: "[NUM1] を [NUM2] で割った余り"
+  defp opcode_label("operator_round"), do: "[NUM] を丸める"
+  defp opcode_label("operator_mathop"), do: "[OPERATOR] の [NUM]"
+  defp opcode_label("data_variable"), do: "[VARIABLE]"
+  defp opcode_label("data_listcontents"), do: "[LIST]"
+  defp opcode_label("data_addtolist"), do: "[ITEM] を [LIST] に追加する"
+  defp opcode_label("data_deleteoflist"), do: "[LIST] の [INDEX] 番目を削除する"
+  defp opcode_label("data_deletealloflist"), do: "[LIST] のすべてを削除する"
+  defp opcode_label("data_insertatlist"), do: "[ITEM] を [LIST] の [INDEX] 番目に挿入する"
+  defp opcode_label("data_replaceitemoflist"), do: "[LIST] の [INDEX] 番目を [ITEM] で置き換える"
+  defp opcode_label("data_itemoflist"), do: "[LIST] の [INDEX] 番目"
+  defp opcode_label("data_itemnumoflist"), do: "[ITEM] の [LIST] での位置"
+  defp opcode_label("data_lengthoflist"), do: "[LIST] の長さ"
+  defp opcode_label("data_listcontainsitem"), do: "[LIST] に [ITEM] が含まれる"
+  defp opcode_label("pen_clear"), do: "全部消す"
+  defp opcode_label("pen_stamp"), do: "スタンプ"
+  defp opcode_label("pen_penDown"), do: "ペンを下ろす"
+  defp opcode_label("pen_penUp"), do: "ペンを上げる"
+  defp opcode_label("pen_setPenColorToColor"), do: "ペンの色を [COLOR] にする"
+  defp opcode_label("pen_changePenColorParamBy"), do: "ペンの [COLOR_PARAM] を [VALUE] ずつ変える"
+  defp opcode_label("pen_setPenColorParamTo"), do: "ペンの [COLOR_PARAM] を [VALUE] にする"
+  defp opcode_label("pen_changePenSizeBy"), do: "ペンの太さを [SIZE] ずつ変える"
+  defp opcode_label("pen_setPenSizeTo"), do: "ペンの太さを [SIZE] にする"
+  # Custom blocks
+  defp opcode_label("procedures_definition"), do: "定義"
+  defp opcode_label("procedures_call"), do: "custom block"
+  # Fallback
+  defp opcode_label(opcode), do: opcode
+
   @doc """
   ファイルパスと拡張子を受け取り、解析済みプロジェクト構造を返す。
   """
@@ -96,13 +229,18 @@ defmodule ScratchInspector.Parser do
   end
 
   defp build_render_stack(nil, _blocks), do: []
+  defp build_detail_stack(nil, _blocks), do: []
 
   defp build_render_stack(start_id, blocks) do
+    build_detail_stack(start_id, blocks)
+  end
+
+  defp build_detail_stack(start_id, blocks) do
     case Map.get(blocks, start_id) do
       block when is_map(block) ->
-        current = build_render_block(start_id, block, blocks)
+        current = build_detail_block(start_id, block, blocks)
         next_id = Map.get(block, "next")
-        [current | build_render_stack(next_id, blocks)]
+        [current | build_detail_stack(next_id, blocks)]
 
       _ ->
         []
@@ -110,6 +248,10 @@ defmodule ScratchInspector.Parser do
   end
 
   defp build_render_block(id, block, blocks) do
+    build_detail_block(id, block, blocks)
+  end
+
+  defp build_detail_block(id, block, blocks) do
     opcode = Map.get(block, "opcode", "")
     inputs = Map.get(block, "inputs", %{})
     fields = Map.get(block, "fields", %{})
@@ -119,10 +261,74 @@ defmodule ScratchInspector.Parser do
       opcode: opcode,
       category: block_category(opcode),
       shape: block_shape(opcode),
+      next: Map.get(block, "next"),
+      mutation: Map.get(block, "mutation", %{}),
+      fields: normalize_detail_fields(fields),
+      inputs: normalize_detail_inputs(inputs, blocks),
+      children: normalize_detail_children(inputs, blocks),
       label: render_block_label(block),
       parts: render_block_parts(fields, inputs, blocks),
       branches: render_block_branches(inputs, blocks)
     }
+  end
+
+  defp normalize_detail_fields(fields) do
+    fields
+    |> Enum.sort_by(fn {key, _} -> key end)
+    |> Enum.map(fn {key, value} ->
+      %{
+        name: key,
+        value: render_field_value(value)
+      }
+    end)
+  end
+
+  defp normalize_detail_inputs(inputs, blocks) do
+    inputs
+    |> Enum.reject(fn {key, _} ->
+      String.starts_with?(key, "SUBSTACK") or key == "custom_block"
+    end)
+    |> Enum.sort_by(fn {key, _} -> key end)
+    |> Enum.map(fn {key, value} ->
+      %{
+        name: key,
+        slot: input_slot_shape(key, value, blocks),
+        value: normalize_detail_input_value(value, blocks)
+      }
+    end)
+  end
+
+  defp normalize_detail_input_value([_, second], blocks), do: normalize_detail_input_atom(second, blocks)
+  defp normalize_detail_input_value([_, second, _fallback], blocks), do: normalize_detail_input_atom(second, blocks)
+  defp normalize_detail_input_value(_, _blocks), do: nil
+
+  defp normalize_detail_input_atom([type, value | _], _blocks) when is_binary(value) or is_number(value) do
+    %{kind: :literal, input_type: type, value: to_string(value)}
+  end
+
+  defp normalize_detail_input_atom(id, blocks) when is_binary(id) do
+    case Map.get(blocks, id) do
+      block when is_map(block) ->
+        %{kind: :block, block: build_detail_block(id, block, blocks)}
+
+      _ ->
+        %{kind: :literal, value: "?"}
+    end
+  end
+
+  defp normalize_detail_input_atom(_, _blocks), do: nil
+
+  defp normalize_detail_children(inputs, blocks) do
+    inputs
+    |> Enum.filter(fn {key, _} -> String.starts_with?(key, "SUBSTACK") end)
+    |> Enum.sort_by(fn {key, _} -> key end)
+    |> Enum.map(fn {key, value} ->
+      %{
+        name: key,
+        blocks: build_detail_stack(extract_input_id(value), blocks)
+      }
+    end)
+    |> Enum.reject(fn child -> Enum.empty?(child.blocks) end)
   end
 
   defp render_block_label(block) do
@@ -231,6 +437,15 @@ defmodule ScratchInspector.Parser do
       opcode == "control_stop" ->
         :cap
 
+      # Boolean reporters (hexagon shape)
+      opcode in ["operator_gt", "operator_lt", "operator_equals", "operator_and", "operator_or", "operator_not"] ->
+        :reporter_boolean
+
+      # Value reporters (oval shape)
+      String.starts_with?(opcode, "operator_") or String.starts_with?(opcode, "sensing_") or
+      opcode in ["data_variable", "data_listcontents", "argument_reporter_boolean", "argument_reporter_string_number"] ->
+        :reporter_round
+
       true ->
         :stack
     end
@@ -250,6 +465,28 @@ defmodule ScratchInspector.Parser do
       String.starts_with?(opcode, "pen_") -> :pen
       true -> :default
     end
+  end
+
+  defp build_custom_block_detail_header(def_id, proto, next_id, blocks) do
+    proto = proto || %{}
+    mutation = Map.get(proto, "mutation", %{})
+    fields = Map.get(proto, "fields", %{})
+    inputs = Map.get(proto, "inputs", %{})
+
+    %{
+      id: def_id,
+      opcode: "procedures_definition",
+      category: :custom,
+      shape: :hat,
+      next: next_id,
+      mutation: mutation,
+      fields: normalize_detail_fields(fields),
+      inputs: normalize_detail_inputs(inputs, blocks),
+      children: normalize_detail_children(inputs, blocks),
+      label: Map.get(mutation, "proccode", "custom block"),
+      parts: render_block_parts(fields, inputs, blocks),
+      branches: render_block_branches(inputs, blocks)
+    }
   end
 
   # ---- costumes & sounds ----
@@ -454,6 +691,21 @@ defmodule ScratchInspector.Parser do
         id: id,
         hat_label: label,
         hat_opcode: opcode,
+        detail_header: %{
+          id: id,
+          opcode: opcode,
+          category: :event,
+          shape: :hat,
+          next: next_id,
+          mutation: %{},
+          fields: [],
+          inputs: [],
+          children: [],
+          label: label,
+          parts: [],
+          branches: []
+        },
+        detail_blocks: build_detail_stack(next_id, blocks),
         blocks: chain,
         render_blocks: build_render_stack(next_id, blocks)
       }
@@ -546,14 +798,16 @@ defmodule ScratchInspector.Parser do
         code_blocks = if next_id, do: walk_block_chain(next_id, blocks), else: []
 
         render_blocks = build_render_stack(next_id, blocks)
+        detail_header = build_custom_block_detail_header(id, proto, next_id, blocks)
+        detail_blocks = build_detail_stack(next_id, blocks)
 
-        {id, name, code_blocks, render_blocks}
+        {id, name, code_blocks, render_blocks, detail_header, detail_blocks}
       end)
 
     # procedure_call ブロックから呼び出し関係を構築
     call_map = build_call_map(blocks)
 
-    Enum.map(definitions, fn {_def_id, name, code_blocks, render_blocks} ->
+    Enum.map(definitions, fn {_def_id, name, code_blocks, render_blocks, detail_header, detail_blocks} ->
       callers = Map.get(call_map, name, [])
 
       %{
@@ -561,7 +815,9 @@ defmodule ScratchInspector.Parser do
         called_by: callers,
         call_count: length(callers),
         code_blocks: code_blocks,
-        render_blocks: render_blocks
+        render_blocks: render_blocks,
+        detail_header: detail_header,
+        detail_blocks: detail_blocks
       }
     end)
   end
@@ -737,190 +993,6 @@ defmodule ScratchInspector.Parser do
       "event_whengreaterthan" -> "値が超えたとき"
       "control_start_as_clone" -> "クローンされたとき"
       _ -> opcode_label(opcode)
-    end
-  end
-
-  def opcode_label(opcode) do
-    case opcode do
-      "event_whenflagclicked" -> "緑の旗"
-      "event_whenbroadcastreceived" -> "メッセージ受信"
-      "event_whenkeypressed" -> "キー押下"
-      "event_whenthisspriteclicked" -> "スプライトクリック"
-      "event_whenstageclicked" -> "ステージクリック"
-      "event_whengreaterthan" -> "値が超えたとき"
-      "event_whenbackdropswitchesto" -> "背景切替"
-      "event_broadcast" -> "送る"
-      "event_broadcastandwait" -> "送って待つ"
-      "control_repeat" -> "🔄 繰り返す"
-      "control_repeat_until" -> "🔄 まで繰り返す"
-      "control_forever" -> "🔁 ずっと"
-      "control_if" -> "❓ もし"
-      "control_if_else" -> "❓ もし〜でなければ"
-      "control_wait" -> "⏱️ 待つ"
-      "control_wait_until" -> "⏱️ まで待つ"
-      "control_stop" -> "🛑 止める"
-      "control_start_as_clone" -> "クローンされたとき"
-      "control_create_clone_of" -> "クローンを作る"
-      "control_delete_this_clone" -> "🗑️ クローンを削除"
-      "motion_movesteps" -> "➡️ 歩動かす"
-      "motion_turnright" -> "↩️ 右に回す"
-      "motion_turnleft" -> "↪️ 左に回す"
-      "motion_gotoxy" -> "📍 x,yへ行く"
-      "motion_goto" -> "📍 へ行く"
-      "motion_glideto" -> "📍 へ滑る"
-      "motion_glidesecstoxy" -> "📍 x,yへ滑る"
-      "motion_pointindirection" -> "🧭 向きを変える"
-      "motion_pointtowards" -> "🧭 へ向ける"
-      "motion_changexby" -> "↔️ xを変える"
-      "motion_changeyby" -> "↕️ yを変える"
-      "motion_setx" -> "↔️ xを設定"
-      "motion_sety" -> "↕️ yを設定"
-      "motion_ifonedgebounce" -> "🔲 端に着いたら跳ね返る"
-      "motion_setrotationstyle" -> "🔄 回転方法"
-      "looks_say" -> "💬 言う"
-      "looks_sayforsecs" -> "💬 秒言う"
-      "looks_think" -> "💭 考える"
-      "looks_thinkforsecs" -> "💭 秒考える"
-      "looks_show" -> "👁️ 表示する"
-      "looks_hide" -> "🙈 隠す"
-      "looks_switchcostumeto" -> "コスチュームを変える"
-      "looks_nextcostume" -> "次のコスチューム"
-      "looks_switchbackdropto" -> "背景を変える"
-      "looks_nextbackdrop" -> "次の背景"
-      "looks_changesizeby" -> "🔍 大きさを変える"
-      "looks_setsizeto" -> "🔍 大きさを設定"
-      "looks_changeeffectby" -> "✨ 効果を変える"
-      "looks_seteffectto" -> "✨ 効果を設定"
-      "looks_cleargraphiceffects" -> "✨ 効果をなくす"
-      "looks_gotofrontback" -> "📐 最前面/最背面"
-      "looks_goforwardbackwardlayers" -> "📐 レイヤー移動"
-      "sound_play" -> "音を鳴らす"
-      "sound_playuntildone" -> "終わるまで音を鳴らす"
-      "sound_stopallsounds" -> "🔇 全ての音を止める"
-      "sound_setvolumeto" -> "音量を設定"
-      "sound_changevolumeby" -> "音量を変える"
-      "sound_seteffectto" -> "音の効果を設定"
-      "sound_changeeffectby" -> "音の効果を変える"
-      "sound_cleareffects" -> "音の効果をなくす"
-      "sensing_askandwait" -> "❓ 聞いて待つ"
-      "sensing_touchingobject" -> "👆 触れた"
-      "sensing_keypressed" -> "キーが押された"
-      "sensing_mousedown" -> "マウスが押された"
-      "sensing_timer" -> "⏱️ タイマー"
-      "sensing_resettimer" -> "⏱️ タイマーリセット"
-      "data_setvariableto" -> "変数を設定"
-      "data_changevariableby" -> "変数を変える"
-      "data_variable" -> "変数"
-      "data_showvariable" -> "変数を表示"
-      "data_hidevariable" -> "変数を隠す"
-      "data_addtolist" -> "リストに追加"
-      "data_deleteoflist" -> "リストから削除"
-      "data_deletealloflist" -> "リスト全削除"
-      "data_insertatlist" -> "リストに挿入"
-      "data_replaceitemoflist" -> "リスト項目を置換"
-      "data_itemoflist" -> "リスト項目"
-      "data_lengthoflist" -> "リスト長さ"
-      "data_listcontainsitem" -> "リストに含まれる"
-      "operator_add" -> "➕ 足す"
-      "operator_subtract" -> "➖ 引く"
-      "operator_multiply" -> "✖️ 掛ける"
-      "operator_divide" -> "➗ 割る"
-      "operator_random" -> "🎲 乱数"
-      "operator_gt" -> "＞ より大きい"
-      "operator_lt" -> "＜ より小さい"
-      "operator_equals" -> "＝ 等しい"
-      "operator_and" -> "かつ"
-      "operator_or" -> "または"
-      "operator_not" -> "ではない"
-      "operator_join" -> "🔗 つなげる"
-      "operator_letter_of" -> "📝 文字"
-      "operator_length" -> "📏 長さ"
-      "operator_mod" -> "📐 余り"
-      "operator_round" -> "🔢 四捨五入"
-      "operator_mathop" -> "🔢 数学関数"
-      "pen_clear" -> "🖊️ 全部消す"
-      "pen_stamp" -> "🖊️ スタンプ"
-      "pen_penDown" -> "🖊️ ペンを下ろす"
-      "pen_penUp" -> "🖊️ ペンを上げる"
-      "pen_setPenColorToColor" -> "🖊️ ペンの色を設定"
-      "pen_setPenSizeTo" -> "🖊️ ペンの太さを設定"
-      "pen_changePenSizeBy" -> "🖊️ ペンの太さを変える"
-      "pen_setPenColorParamTo" -> "🖊️ ペンのパラメータを設定"
-      "pen_changePenColorParamBy" -> "🖊️ ペンのパラメータを変える"
-      "pen_menu_colorParam" -> "🖊️ 色パラメータ"
-      "procedures_definition" -> "定義"
-      "procedures_call" -> "呼び出し"
-      "procedures_prototype" -> "プロトタイプ"
-      "argument_reporter_string_number" -> "📥 引数"
-      "argument_reporter_boolean" -> "📥 真偽引数"
-      # モーション（レポーター）
-      "motion_xposition" -> "↔️ x座標"
-      "motion_yposition" -> "↕️ y座標"
-      "motion_direction" -> "🧭 向き"
-      "motion_scroll_right" -> "↔️ 右スクロール"
-      "motion_scroll_up" -> "↕️ 上スクロール"
-      "motion_align_scene" -> "📐 シーンに整列"
-      "motion_goto_menu" -> "📍 移動先"
-      "motion_glideto_menu" -> "📍 滑る先"
-      "motion_pointtowards_menu" -> "🧭 向ける先"
-      # 見た目（レポーター・メニュー）
-      "looks_costumenumbername" -> "コスチューム番号/名"
-      "looks_backdropnumbername" -> "背景番号/名"
-      "looks_size" -> "🔍 大きさ"
-      "looks_costume" -> "コスチューム"
-      "looks_backdrops" -> "背景"
-      # 音（レポーター・メニュー）
-      "sound_volume" -> "音量"
-      "sound_sounds_menu" -> "サウンド"
-      # センサー（未訳分）
-      "sensing_touchingcolor" -> "👆 色に触れた"
-      "sensing_coloristouchingcolor" -> "👆 色が色に触れた"
-      "sensing_distanceto" -> "📏 距離"
-      "sensing_answer" -> "💬 答え"
-      "sensing_loudness" -> "音の大きさ"
-      "sensing_mousex" -> "マウスのx座標"
-      "sensing_mousey" -> "マウスのy座標"
-      "sensing_setdragmode" -> "ドラッグモード設定"
-      "sensing_current" -> "🕐 現在の時刻"
-      "sensing_dayssince2000" -> "📅 2000年からの日数"
-      "sensing_username" -> "👤 ユーザー名"
-      "sensing_of" -> "の値"
-      "sensing_of_object_menu" -> "オブジェクト"
-      "sensing_distanceto_menu" -> "📏 距離の対象"
-      "sensing_touchingobjectmenu" -> "👆 触れる対象"
-      "sensing_keyoptions" -> "キー"
-      # 演算子（未訳分）
-      "operator_contains" -> "🔍 を含む"
-      # データ（未訳分）
-      "data_showlist" -> "リストを表示"
-      "data_hidelist" -> "リストを隠す"
-      # micro:bit 拡張機能
-      "microbit_whenButtonPressed" -> "🔘 ボタンが押されたとき"
-      "microbit_isButtonPressed" -> "🔘 ボタンが押されている"
-      "microbit_whenGesture" -> "📐 動きを検知したとき"
-      "microbit_displaySymbol" -> "💡 LEDに表示する"
-      "microbit_displayText" -> "💡 テキストを表示する"
-      "microbit_displayClear" -> "💡 LEDを消す"
-      "microbit_whenTilted" -> "📐 傾いたとき"
-      "microbit_isTilted" -> "📐 傾いている"
-      "microbit_getTiltAngle" -> "📐 傾きの角度"
-      "microbit_whenPinConnected" -> "🔌 ピンが繋がれたとき"
-      "microbit_menu_buttons" -> "🔘 ボタン"
-      "microbit_menu_gestures" -> "📐 動き"
-      "microbit_menu_tiltDirectionAny" -> "📐 傾き方向"
-      "microbit_menu_tiltDirection" -> "📐 傾き方向"
-      # toio 拡張機能
-      "toio_whenButtonPressed" -> "🔘 ボタンが押されたとき"
-      "toio_isButtonPressed" -> "🔘 ボタンが押されている"
-      "toio_moveFor" -> "🚗 方向に動かす"
-      "toio_moveWheelsFor" -> "🚗 左右ホイールで動かす"
-      "toio_playNoteFor" -> "🎵 音符を鳴らす"
-      "toio_setLightColorFor" -> "💡 ライトの色を設定"
-      "toio_turnOffLight" -> "💡 ライトを消す"
-      "toio_menu_moveDirections" -> "🚗 移動方向"
-      "toio_menu_changedStates" -> "変化の状態"
-      "toio_menu_isChangedStates" -> "変化状態"
-      _ -> opcode
     end
   end
 end
