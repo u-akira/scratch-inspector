@@ -38,7 +38,7 @@
 
 .hexagon {
   @apply rounded-none;
-  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  clip-path: polygon(10% 0%, 90% 0%, 100% 50%, 90% 100%, 10% 100%, 0% 50%);
 }
 
 .scratch-slot {
@@ -51,13 +51,20 @@
   @apply bg-[#f7fffb] text-[#17643d] ring-[#8dd8ad];
 }
 .scratch-slot--boolean.scratch-slot--block {
-  @apply bg-[#f7fffb] ring-[#8dd8ad] text-[#0f3d29];
+  @apply rounded-none bg-transparent p-0 text-[#0f3d29] ring-0;
+  clip-path: polygon(10% 0%, 90% 0%, 100% 50%, 90% 100%, 10% 100%, 0% 50%);
 }
 .scratch-slot--round {
   @apply rounded-full ring-1 px-3;
 }
 .scratch-slot--round.scratch-slot--literal {
   @apply rounded-full bg-white text-black ring-slate-300;
+}
+.scratch-slot--round.scratch-slot--literal.scratch-slot--data-ref {
+  @apply bg-[#FF8C1A] text-white ring-[#d97512];
+}
+.scratch-slot--round.scratch-slot--literal.scratch-slot--event-literal {
+  @apply bg-[#d99d00] text-white ring-[#b88400];
 }
 .scratch-slot--round.scratch-slot--block {
   @apply bg-[#fff7e6]/40 ring-[#ffd27a]/50 text-[#5f4215];
@@ -85,4 +92,18 @@
 }
 .scratch-block-child-label {
   @apply mb-1 pl-1 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-700;
+}
+
+.scratch-c-block-frame {
+  @apply -mt-px inline-block w-fit max-w-full;
+}
+
+.scratch-c-block-scope {
+  @apply w-full rounded-bl-[1.1rem] bg-transparent pl-0 pr-2 pb-2 pt-1;
+  border-left: 10px solid var(--c-block-accent, #FFAB19);
+  border-bottom: 10px solid var(--c-block-accent, #FFAB19);
+}
+
+.scratch-c-block-head-joined {
+  @apply rounded-b-none border-b-0 pb-1;
 }

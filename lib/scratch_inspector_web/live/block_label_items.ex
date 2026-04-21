@@ -1,8 +1,8 @@
 defmodule ScratchInspectorWeb.Live.BlockLabelItems do
   @moduledoc false
 
-  @placeholder_split ~r/(\[[A-Z_]+\])/
-  @placeholder_capture ~r/^\[([A-Z_]+)\]$/
+  @placeholder_split ~r/(\[[A-Z0-9_]+\])/
+  @placeholder_capture ~r/^\[([A-Z0-9_]+)\]$/
 
   def parse(label, fields, inputs) when is_binary(label) do
     Regex.split(@placeholder_split, label, include_captures: true)

@@ -891,15 +891,18 @@ defmodule ScratchInspectorWeb.InspectorLive do
       assigns
       |> assign(:category_class, scratch_category_class(assigns.block.category))
       |> assign(:shape_class, scratch_shape_class(assigns.block.shape))
-      |> assign(:items, scratch_block_items(assigns.block))
+      |> assign(:items, scratch_block_items(assigns.block) |> annotate_items(assigns.block))
       |> assign(:child_container_class, scratch_child_container_class(assigns.block.shape))
+      |> assign(:c_block?, assigns.block.shape == :c_block)
+      |> assign(:c_block_join_class, c_block_join_class(assigns.block))
 
     ~H"""
-    <div class="mb-0.5 flex flex-col items-start w-full min-w-0">
+    <div class="flex flex-col items-start w-full min-w-0">
       <div class={[
         "scratch-block",
         @category_class,
-        @shape_class
+        @shape_class,
+        @c_block_join_class
       ]}>
         <%= for item <- @items do %>
           <.scratch_block_item item={item} />
@@ -907,20 +910,40 @@ defmodule ScratchInspectorWeb.InspectorLive do
       </div>
 
       <%= if Enum.any?(@block.children || []) do %>
-        <div class={@child_container_class}>
-          <%= for child <- @block.children do %>
-            <div class="mb-2 last:mb-0">
-              <%= if child_name = scratch_child_name(child.name) do %>
-                <div class="scratch-block-child-label">
-                  {child_name}
+        <%= if @c_block? do %>
+          <div class="scratch-c-block-frame">
+            <div
+              class="scratch-c-block-scope"
+              style={"--c-block-accent: #{scratch_category_hex(assigns.block.category)}"}
+            >
+              <%= for child <- @block.children do %>
+                <div class="mb-2 last:mb-0">
+                  <%= if child_name = scratch_child_name(child.name) do %>
+                    <div class="scratch-block-child-label">
+                      {child_name}
+                    </div>
+                  <% end %>
+                  <.scratch_stack blocks={child.blocks} />
                 </div>
               <% end %>
-              <div class="scratch-block-child-inner">
-                <.scratch_stack blocks={child.blocks} />
-              </div>
             </div>
-          <% end %>
-        </div>
+          </div>
+        <% else %>
+          <div class={@child_container_class}>
+            <%= for child <- @block.children do %>
+              <div class="mb-2 last:mb-0">
+                <%= if child_name = scratch_child_name(child.name) do %>
+                  <div class="scratch-block-child-label">
+                    {child_name}
+                  </div>
+                <% end %>
+                <div class="scratch-block-child-inner">
+                  <.scratch_stack blocks={child.blocks} />
+                </div>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
       <% end %>
     </div>
     """
@@ -940,9 +963,13 @@ defmodule ScratchInspectorWeb.InspectorLive do
       <% :field -> %>
         <span class={@item_class}>{@item.value}</span>
       <% :input when is_map(@item.value) and @item.value.kind == :block -> %>
-        <span class={@item_class}>
+        <%= if inline_block_without_slot_wrapper?(@item) do %>
           <.scratch_inline_block block={@item.value.block} />
-        </span>
+        <% else %>
+          <span class={@item_class}>
+            <.scratch_inline_block block={@item.value.block} />
+          </span>
+        <% end %>
       <% :input -> %>
         <span class={@item_class}>
           {scratch_input_text(@item.value)}
@@ -958,7 +985,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
       assigns
       |> assign(:category_class, scratch_category_class(assigns.block.category))
       |> assign(:shape_class, inline_shape_class(assigns.block.shape))
-      |> assign(:items, scratch_block_items(assigns.block))
+      |> assign(:items, scratch_block_items(assigns.block) |> annotate_items(assigns.block))
 
     ~H"""
     <span class={[
@@ -979,8 +1006,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp scratch_block_item_class(%{kind: :input, value: %{kind: :block}, slot: slot}),
     do: scratch_slot_class(slot, :block)
 
-  defp scratch_block_item_class(%{kind: :input, slot: slot}),
-    do: scratch_slot_class(slot, :literal)
+  defp scratch_block_item_class(%{kind: :input, slot: slot, value: value}) do
+    [scratch_slot_class(slot, :literal), scratch_input_semantic_class(value), scratch_slot_category_semantic_class(slot, value, :input)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+  end
 
   defp scratch_slot_class(:boolean, :literal),
     do: "scratch-slot scratch-slot--boolean scratch-slot--literal"
@@ -999,6 +1029,29 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
   defp scratch_slot_class(_, :block),
     do: "scratch-slot scratch-slot--block"
+
+  # Scratch inline variable/list primitives (input_type 12/13) should be visually distinct
+  # from literal values like numbers, so users can immediately spot data references.
+  defp scratch_input_semantic_class(%{kind: :literal, input_type: input_type})
+       when input_type in [12, 13],
+       do: "scratch-slot--data-ref"
+
+  defp scratch_input_semantic_class(%{"kind" => "literal", "input_type" => input_type})
+       when input_type in [12, 13],
+       do: "scratch-slot--data-ref"
+
+  defp scratch_input_semantic_class(_), do: nil
+
+  defp scratch_slot_category_semantic_class(:round, %{parent_category: :event}, :input),
+    do: "scratch-slot--event-literal"
+
+  defp scratch_slot_category_semantic_class(_, _, _), do: nil
+
+  defp annotate_items(items, %{category: category}) when is_list(items) do
+    Enum.map(items, &Map.put(&1, :parent_category, category))
+  end
+
+  defp annotate_items(items, _), do: items
 
   defp scratch_block_items(%{opcode: "procedures_definition"} = block) do
     label_items =
@@ -1057,6 +1110,18 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp scratch_category_class(:pen), do: "bg-[#0FBD8C]"
   defp scratch_category_class(_), do: "bg-slate-500"
 
+  defp scratch_category_hex(:motion), do: "#4C97FF"
+  defp scratch_category_hex(:looks), do: "#9966FF"
+  defp scratch_category_hex(:sound), do: "#CF63CF"
+  defp scratch_category_hex(:event), do: "#FFBF00"
+  defp scratch_category_hex(:control), do: "#FFAB19"
+  defp scratch_category_hex(:sensing), do: "#5CB1D6"
+  defp scratch_category_hex(:operator), do: "#59C059"
+  defp scratch_category_hex(:data), do: "#FF8C1A"
+  defp scratch_category_hex(:custom), do: "#FF6680"
+  defp scratch_category_hex(:pen), do: "#0FBD8C"
+  defp scratch_category_hex(_), do: "#64748B"
+
   defp scratch_shape_class(:hat), do: "rounded-t-[1.4rem] rounded-b-lg"
   defp scratch_shape_class(:c_block), do: "rounded-t-lg rounded-b-md pb-2"
   defp scratch_shape_class(:cap), do: "rounded-t-lg rounded-b-[1.35rem]"
@@ -1097,6 +1162,21 @@ defmodule ScratchInspectorWeb.InspectorLive do
   defp scratch_child_name("SUBSTACK"), do: nil
   defp scratch_child_name("SUBSTACK2"), do: "else"
   defp scratch_child_name(_), do: nil
+
+  defp inline_block_without_slot_wrapper?(%{
+         kind: :input,
+         value: %{kind: :block, block: %{shape: shape}}
+       })
+       when shape in [:round, :reporter_round],
+       do: true
+
+  defp inline_block_without_slot_wrapper?(_), do: false
+
+  defp c_block_join_class(%{shape: :c_block, children: children}) when is_list(children) do
+    if Enum.any?(children), do: "scratch-c-block-head-joined", else: nil
+  end
+
+  defp c_block_join_class(_), do: nil
 
   defp custom_block_signature(%{kind: :custom_block, header: header}) when is_map(header) do
     mutation = Map.get(header, :mutation, %{})

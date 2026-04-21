@@ -81,4 +81,21 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItemsTest do
              ]
     end
   end
+
+  test "parses digit placeholders for operator equals" do
+    label = "[OPERAND1] = [OPERAND2]"
+
+    fields = []
+
+    inputs = [
+      %{name: "OPERAND1", slot: :round, value: %{kind: :literal, value: "x"}},
+      %{name: "OPERAND2", slot: :round, value: %{kind: :literal, value: "1"}}
+    ]
+
+    assert BlockLabelItems.parse(label, fields, inputs) == [
+             %{kind: :input, name: "OPERAND1", slot: :round, value: %{kind: :literal, value: "x"}},
+             %{kind: :label, value: " = "},
+             %{kind: :input, name: "OPERAND2", slot: :round, value: %{kind: :literal, value: "1"}}
+           ]
+  end
 end

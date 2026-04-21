@@ -36,6 +36,9 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("motion_setx"), do: "x座標を [X] にする"
   defp opcode_label("motion_changeyby"), do: "y座標を [DY] ずつ変える"
   defp opcode_label("motion_sety"), do: "y座標を [Y] にする"
+  defp opcode_label("motion_xposition"), do: "x座標"
+  defp opcode_label("motion_yposition"), do: "y座標"
+  defp opcode_label("motion_direction"), do: "向き"
   defp opcode_label("motion_ifonedgebounce"), do: "もし端に着いたら、跳ね返る"
   defp opcode_label("motion_setrotationstyle"), do: "回転方法を [STYLE] にする"
   defp opcode_label("looks_sayforsecs"), do: "[MESSAGE] と [SECS] 秒言う"
@@ -48,7 +51,8 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("looks_setEffectTo"), do: "[EFFECT] の効果を [VALUE] にする"
   defp opcode_label("looks_cleargraphiceffects"), do: "画像効果をなくす"
   defp opcode_label("looks_changesizeby"), do: "大きさを [CHANGE] ずつ変える"
-  defp opcode_label("looks_setsizeto"), do: "大きさを [CHANGE] %にする"
+  defp opcode_label("looks_setsizeto"), do: "大きさを [SIZE] %にする"
+  defp opcode_label("looks_size"), do: "大きさ"
   defp opcode_label("looks_gotofrontback"), do: "[FRONT_BACK] へ移動する"
   defp opcode_label("looks_goforwardbackwardlayers"), do: "[FORWARD_BACKWARD] [NUM] 層移動する"
   defp opcode_label("looks_costumenumbername"), do: "コスチュームの [NUMBER_NAME]"
@@ -58,6 +62,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("looks_switchbackdropto"), do: "背景を [BACKDROP] にする"
   defp opcode_label("looks_switchbackdroptoandwait"), do: "背景を [BACKDROP] にする"
   defp opcode_label("looks_nextbackdrop"), do: "次の背景にする"
+  defp opcode_label("looks_backdropnumbername"), do: "背景の [NUMBER_NAME]"
   defp opcode_label("sound_playuntildone"), do: "[SOUND_MENU] を鳴らす"
   defp opcode_label("sound_play"), do: "[SOUND_MENU] を鳴らす"
   defp opcode_label("sound_stopallsounds"), do: "すべての音を止める"
@@ -69,6 +74,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("sound_volume"), do: "音量"
   defp opcode_label("event_broadcast"), do: "[BROADCAST_INPUT] を送る"
   defp opcode_label("event_broadcastandwait"), do: "[BROADCAST_INPUT] を送って待つ"
+  defp opcode_label("event_whenbroadcastreceived"), do: "[BROADCAST_OPTION] を受け取ったとき"
   defp opcode_label("control_wait"), do: "[DURATION] 秒待つ"
   defp opcode_label("control_repeat_until"), do: "[CONDITION] まで繰り返す"
   defp opcode_label("control_while"), do: "[CONDITION] の間繰り返す"
@@ -410,13 +416,10 @@ defmodule ScratchInspector.Parser do
 
   defp block_input_shape(opcode) do
     cond do
-      opcode in ["operator_gt", "operator_lt", "operator_equals", "operator_and", "operator_or", "operator_not"] ->
+      boolean_reporter_opcode?(opcode) ->
         :boolean
 
-      String.starts_with?(opcode, "operator_") or String.starts_with?(opcode, "sensing_") ->
-        :round
-
-      opcode in ["data_variable", "data_listcontents", "argument_reporter_boolean", "argument_reporter_string_number"] ->
+      round_reporter_opcode?(opcode) ->
         :round
 
       true ->
@@ -438,17 +441,45 @@ defmodule ScratchInspector.Parser do
         :cap
 
       # Boolean reporters (hexagon shape)
-      opcode in ["operator_gt", "operator_lt", "operator_equals", "operator_and", "operator_or", "operator_not"] ->
+      boolean_reporter_opcode?(opcode) ->
         :reporter_boolean
 
       # Value reporters (oval shape)
-      String.starts_with?(opcode, "operator_") or String.starts_with?(opcode, "sensing_") or
-      opcode in ["data_variable", "data_listcontents", "argument_reporter_boolean", "argument_reporter_string_number"] ->
+      round_reporter_opcode?(opcode) ->
         :reporter_round
 
       true ->
         :stack
     end
+  end
+
+  defp boolean_reporter_opcode?(opcode) do
+    opcode in [
+      "operator_gt",
+      "operator_lt",
+      "operator_equals",
+      "operator_and",
+      "operator_or",
+      "operator_not",
+      "argument_reporter_boolean"
+    ]
+  end
+
+  defp round_reporter_opcode?(opcode) do
+    String.starts_with?(opcode, "operator_") or
+      String.starts_with?(opcode, "sensing_") or
+      opcode in [
+        "data_variable",
+        "data_listcontents",
+        "argument_reporter_string_number",
+        "motion_xposition",
+        "motion_yposition",
+        "motion_direction",
+        "looks_costumenumbername",
+        "looks_backdropnumbername",
+        "looks_size",
+        "sound_volume"
+      ]
   end
 
   defp block_category(opcode) do
