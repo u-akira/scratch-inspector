@@ -17,7 +17,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("control_if_else"), do: "もし [CONDITION] なら"
   defp opcode_label("control_repeat"), do: "[TIMES] 回繰り返す"
   defp opcode_label("control_forever"), do: "ずっと"
-  defp opcode_label("control_stop"), do: "[STOP_OPTION] を止める"
+  defp opcode_label("control_stop"), do: "[STOP_OPTION] "
   defp opcode_label("event_whenflagclicked"), do: "緑の旗がクリックされたとき"
   defp opcode_label("event_whenkeypressed"), do: "[KEY_OPTION] キーが押されたとき"
   defp opcode_label("event_whenthisspriteclicked"), do: "このスプライトがクリックされたとき"
@@ -285,7 +285,7 @@ defmodule ScratchInspector.Parser do
     |> Enum.map(fn {key, value} ->
       %{
         name: key,
-        value: render_field_value(value)
+        value: render_field_value(key, value)
       }
     end)
   end
@@ -353,7 +353,7 @@ defmodule ScratchInspector.Parser do
       fields
       |> Enum.sort_by(fn {key, _} -> key end)
       |> Enum.map(fn {key, value} ->
-        %{name: key, slot: :round, value: render_field_value(value)}
+        %{name: key, slot: :round, value: render_field_value(key, value)}
       end)
       |> Enum.reject(&is_nil(&1.value))
 
@@ -369,8 +369,15 @@ defmodule ScratchInspector.Parser do
     field_parts ++ input_parts
   end
 
-  defp render_field_value([value | _]) when is_binary(value), do: value
-  defp render_field_value(_), do: nil
+  defp render_field_value(field_name, [value | _]) when is_binary(value),
+    do: normalize_field_value(field_name, value)
+
+  defp render_field_value(_field_name, _), do: nil
+
+  defp normalize_field_value("STOP_OPTION", "all"), do: "すべてを止める"
+  defp normalize_field_value("STOP_OPTION", "this script"), do: "このスクリプトを止める"
+  defp normalize_field_value("STOP_OPTION", "other scripts in sprite"), do: "スプライトの他のスクリプトを止める"
+  defp normalize_field_value(_field_name, value), do: value
 
   defp render_input_value([_, second], blocks), do: render_input_atom(second, blocks)
   defp render_input_value([_, second, _fallback], blocks), do: render_input_atom(second, blocks)
@@ -650,9 +657,9 @@ defmodule ScratchInspector.Parser do
   defp extract_block_params(inputs, fields, blocks) do
     field_params =
       fields
-      |> Enum.map(fn {_key, val} ->
+      |> Enum.map(fn {key, val} ->
         case val do
-          [name | _] when is_binary(name) -> name
+          [name | _] when is_binary(name) -> normalize_field_value(key, name)
           _ -> nil
         end
       end)
