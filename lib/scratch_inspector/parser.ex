@@ -721,6 +721,8 @@ defmodule ScratchInspector.Parser do
       opcode = Map.get(block, "opcode", "")
       value = extract_event_value(block)
       label = event_label_from_opcode(opcode, value)
+      detail_label = event_detail_label(opcode, label)
+      detail_fields = event_detail_fields(opcode, value)
 
       # 最初の子ブロックから辿る
       next_id = Map.get(block, "next")
@@ -737,10 +739,10 @@ defmodule ScratchInspector.Parser do
           shape: :hat,
           next: next_id,
           mutation: %{},
-          fields: [],
+          fields: detail_fields,
           inputs: [],
           children: [],
-          label: label,
+          label: detail_label,
           parts: [],
           branches: []
         },
@@ -808,6 +810,15 @@ defmodule ScratchInspector.Parser do
         nil
     end
   end
+
+  defp event_detail_label("event_whenbroadcastreceived", _label), do: "[BROADCAST_OPTION]を受け取ったとき"
+  defp event_detail_label(_opcode, label), do: label
+
+  defp event_detail_fields("event_whenbroadcastreceived", value) when is_binary(value) and value != "" do
+    [%{name: "BROADCAST_OPTION", value: value}]
+  end
+
+  defp event_detail_fields(_, _), do: []
 
   defp collect_child_labels(parent_id, blocks) do
     blocks
@@ -1024,7 +1035,7 @@ defmodule ScratchInspector.Parser do
   defp event_label_from_opcode(opcode, value) do
     case opcode do
       "event_whenflagclicked" -> "緑の旗がクリックされたとき"
-      "event_whenbroadcastreceived" -> "「#{value}」を受け取ったとき"
+      "event_whenbroadcastreceived" -> "#{value}を受け取ったとき"
       "event_whenkeypressed" -> "「#{value}」キーが押されたとき"
       "event_whenthisspriteclicked" -> "スプライトがクリックされたとき"
       "event_whenstageclicked" -> "ステージがクリックされたとき"
