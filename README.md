@@ -101,7 +101,7 @@ mix setup
 mix phx.server
 ```
 
-ブラウザで http://localhost:4000 を開く。
+ブラウザで http://localhost:4001 を開く。
 
 ### トラブルシューティング
 
