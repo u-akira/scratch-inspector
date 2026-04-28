@@ -65,6 +65,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("looks_backdropnumbername"), do: "背景の [NUMBER_NAME]"
   defp opcode_label("sound_playuntildone"), do: "[SOUND_MENU] を鳴らす"
   defp opcode_label("sound_play"), do: "[SOUND_MENU] を鳴らす"
+  defp opcode_label("sound_sounds_menu"), do: "[SOUND_MENU]"
   defp opcode_label("sound_stopallsounds"), do: "すべての音を止める"
   defp opcode_label("sound_changeeffectby"), do: "[EFFECT] の効果を [VALUE] ずつ変える"
   defp opcode_label("sound_seteffectto"), do: "[EFFECT] の効果を [VALUE] にする"
