@@ -139,6 +139,17 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("pen_setPenColorParamTo"), do: "ペンの [COLOR_PARAM] を [VALUE] にする"
   defp opcode_label("pen_changePenSizeBy"), do: "ペンの太さを [SIZE] ずつ変える"
   defp opcode_label("pen_setPenSizeTo"), do: "ペンの太さを [SIZE] にする"
+  # micro:bit extension
+  defp opcode_label("microbit_whenButtonPressed"), do: "ボタン[BTN]が押されたとき"
+  defp opcode_label("microbit_isButtonPressed"), do: "ボタン[BTN]が押された"
+  defp opcode_label("microbit_whenGesture"), do: "[GESTURE]とき"
+  defp opcode_label("microbit_displaySymbol"), do: "[MATRIX]を表示する"
+  defp opcode_label("microbit_displayText"), do: "[TEXT]を表示する"
+  defp opcode_label("microbit_displayClear"), do: "画面を消す"
+  defp opcode_label("microbit_whenTilted"), do: "[DIRECTION]に傾いたとき"
+  defp opcode_label("microbit_isTilted"), do: "[DIRECTION]に傾いた"
+  defp opcode_label("microbit_getTiltAngle"), do: "[DIRECTION]方向の傾き"
+  defp opcode_label("microbit_whenPinConnected"), do: "ピン[PIN]がつながったとき"
   # Custom blocks
   defp opcode_label("procedures_definition"), do: "定義"
   defp opcode_label("procedures_call"), do: "custom block"
@@ -377,6 +388,15 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("STOP_OPTION", "all"), do: "すべてを止める"
   defp normalize_field_value("STOP_OPTION", "this script"), do: "このスクリプトを止める"
   defp normalize_field_value("STOP_OPTION", "other scripts in sprite"), do: "スプライトの他のスクリプトを止める"
+  defp normalize_field_value("BTN", "any"), do: "どれかの"
+  defp normalize_field_value("GESTURE", "moved"), do: "動いた"
+  defp normalize_field_value("GESTURE", "shaken"), do: "振られた"
+  defp normalize_field_value("GESTURE", "jumped"), do: "ジャンプした"
+  defp normalize_field_value("DIRECTION", "front"), do: "前"
+  defp normalize_field_value("DIRECTION", "back"), do: "後ろ"
+  defp normalize_field_value("DIRECTION", "left"), do: "左"
+  defp normalize_field_value("DIRECTION", "right"), do: "右"
+  defp normalize_field_value("DIRECTION", "any"), do: "どれかの向き"
   defp normalize_field_value(_field_name, value), do: value
 
   defp render_input_value([_, second], blocks), do: render_input_atom(second, blocks)
@@ -439,7 +459,9 @@ defmodule ScratchInspector.Parser do
     cond do
       opcode in ["event_whenflagclicked", "event_whenbroadcastreceived", "event_whenkeypressed",
                  "event_whenthisspriteclicked", "event_whenstageclicked", "event_whengreaterthan",
-                 "event_whenbackdropswitchesto", "control_start_as_clone"] ->
+                 "event_whenbackdropswitchesto", "control_start_as_clone",
+                 "microbit_whenButtonPressed", "microbit_whenGesture",
+                 "microbit_whenTilted", "microbit_whenPinConnected"] ->
         :hat
 
       opcode in ["control_forever", "control_repeat", "control_repeat_until", "control_if", "control_if_else"] ->
@@ -469,7 +491,9 @@ defmodule ScratchInspector.Parser do
       "operator_and",
       "operator_or",
       "operator_not",
-      "argument_reporter_boolean"
+      "argument_reporter_boolean",
+      "microbit_isButtonPressed",
+      "microbit_isTilted"
     ]
   end
 
@@ -486,7 +510,8 @@ defmodule ScratchInspector.Parser do
         "looks_costumenumbername",
         "looks_backdropnumbername",
         "looks_size",
-        "sound_volume"
+        "sound_volume",
+        "microbit_getTiltAngle"
       ]
   end
 
@@ -502,6 +527,7 @@ defmodule ScratchInspector.Parser do
       String.starts_with?(opcode, "data_") -> :data
       String.starts_with?(opcode, "procedures_") -> :custom
       String.starts_with?(opcode, "pen_") -> :pen
+      String.starts_with?(opcode, "microbit_") -> :extension
       true -> :default
     end
   end
