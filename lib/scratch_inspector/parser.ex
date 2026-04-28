@@ -63,7 +63,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("looks_switchbackdroptoandwait"), do: "背景を [BACKDROP] にする"
   defp opcode_label("looks_nextbackdrop"), do: "次の背景にする"
   defp opcode_label("looks_backdropnumbername"), do: "背景の [NUMBER_NAME]"
-  defp opcode_label("sound_playuntildone"), do: "[SOUND_MENU] を鳴らす"
+  defp opcode_label("sound_playuntildone"), do: "終わるまで [SOUND_MENU] の音を鳴らす"
   defp opcode_label("sound_play"), do: "[SOUND_MENU] の音を鳴らす"
   defp opcode_label("sound_sounds_menu"), do: "[SOUND_MENU]"
   defp opcode_label("sound_stopallsounds"), do: "すべての音を止める"
