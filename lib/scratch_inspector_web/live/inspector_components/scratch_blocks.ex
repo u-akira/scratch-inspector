@@ -230,6 +230,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   defp scratch_child_name("SUBSTACK"), do: nil
   defp scratch_child_name("SUBSTACK2"), do: "else"
   defp scratch_child_name(_), do: nil
+  defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "sound_sounds_menu"}}}), do: true
   defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{shape: shape}}}) when shape in [:round, :reporter_round], do: true
   defp inline_block_without_slot_wrapper?(_), do: false
   defp c_block_join_class(%{shape: :c_block, children: children}) when is_list(children), do: if(Enum.any?(children), do: "scratch-c-block-head-joined", else: nil)
