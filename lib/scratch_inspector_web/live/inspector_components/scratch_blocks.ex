@@ -154,6 +154,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   defp scratch_block_item_class(%{kind: :label}), do: "scratch-block-item-label"
   defp scratch_block_item_class(%{kind: :definition_name}), do: "scratch-block-item-definition-name"
   defp scratch_block_item_class(%{kind: :field}), do: "scratch-block-item-field"
+  defp scratch_block_item_class(%{kind: :input, name: "BROADCAST_INPUT"}), do: "scratch-block-item-field"
   defp scratch_block_item_class(%{kind: :input, value: %{kind: :block}, slot: slot}), do: scratch_slot_class(slot, :block)
   defp scratch_block_item_class(%{kind: :input, slot: slot, value: value}) do
     [scratch_slot_class(slot, :literal), scratch_input_semantic_class(value), scratch_slot_category_semantic_class(slot, value, :input)]
