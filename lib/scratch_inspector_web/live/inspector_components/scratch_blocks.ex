@@ -73,6 +73,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
       |> assign(:items, scratch_block_items(assigns.block) |> annotate_items(assigns.block))
       |> assign(:child_container_class, scratch_child_container_class(assigns.block.shape))
       |> assign(:c_block?, assigns.block.shape == :c_block)
+      |> assign(:show_green_flag_icon, assigns.block.opcode == "event_whenflagclicked")
       |> assign(:show_extension_icon, assigns.block.category == :extension)
       |> assign(:microbit_icon_uri, @microbit_icon_uri)
       |> assign(:c_block_join_class, c_block_join_class(assigns.block))
@@ -80,6 +81,16 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
     ~H"""
     <div class="flex flex-col items-start w-full min-w-0">
       <div class={["scratch-block", @category_class, @shape_class, @c_block_join_class]}>
+        <span :if={@show_green_flag_icon} class="inline-flex shrink-0 items-center justify-center">
+          <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+            <image
+              height="24px"
+              width="24px"
+              href="/blocks-media/default/green-flag.svg"
+            >
+            </image>
+          </svg>
+        </span>
         <img :if={@show_extension_icon} src={@microbit_icon_uri} alt="" class="h-5 w-5 shrink-0" />
         <%= for item <- @items do %>
           <.scratch_block_item item={item} />

@@ -31,7 +31,7 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
           %{
             id: "script_#{idx}",
             detail: flow_detail_payload(%{kind: "script", id: script.id}, target),
-            label: script.hat_label,
+            label: flow_node_label(script),
             class: :script,
             script: script
           }
@@ -262,6 +262,17 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
   end
 
   defp escape_mermaid_label(label) do
+    label = to_string(label || "")
+
+    if String.contains?(label, "<img ") do
+      label
+      |> String.replace("\n", "<br/>")
+    else
+      escape_plain_mermaid_label(label)
+    end
+  end
+
+  defp escape_plain_mermaid_label(label) do
     label
     |> String.replace("&", "&amp;")
     |> String.replace("\"", "&quot;")
@@ -270,6 +281,12 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
     |> String.replace("&lt;br/&gt;", "<br/>")
     |> String.replace("\n", "<br/>")
   end
+
+  defp flow_node_label(%{hat_opcode: "event_whenflagclicked"}) do
+    ~s(<img src="/blocks-media/default/green-flag.svg" width="1em" height="1em" style="display:inline-block;width:1em;height:1em;max-width:none;vertical-align:-0.12em;margin-right:0.28em;" />が押されたとき)
+  end
+
+  defp flow_node_label(script), do: script.hat_label
 
   defp mermaid_class(:script), do: "scriptNode"
   defp mermaid_class(:block_def), do: "blockNode"

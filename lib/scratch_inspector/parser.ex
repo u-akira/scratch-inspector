@@ -1060,7 +1060,7 @@ defmodule ScratchInspector.Parser do
 
   defp event_label_from_opcode(opcode, value) do
     case opcode do
-      "event_whenflagclicked" -> "緑の旗がクリックされたとき"
+      "event_whenflagclicked" -> "が押されたとき"
       "event_whenbroadcastreceived" -> "#{value}を受け取ったとき"
       "event_whenkeypressed" -> "「#{value}」キーが押されたとき"
       "event_whenthisspriteclicked" -> "スプライトがクリックされたとき"
