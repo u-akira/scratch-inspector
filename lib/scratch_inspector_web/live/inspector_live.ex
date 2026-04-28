@@ -328,9 +328,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
         <% end %>
         
         <%= if @flow_detail && (@detail_script != nil || @detail_receivers != nil) do %>
-          <div class="border border-gray-200 rounded-xl overflow-hidden bg-white">
-            <div class="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
-              <span class="text-sm font-semibold text-gray-700">{@detail_title}</span>
+          <div class="relative border border-gray-200 rounded-xl overflow-hidden bg-white">
+            <div class="absolute right-3 top-3 z-10">
               <button
                 phx-click="flow_select_detail"
                 phx-value-kind={@flow_detail.kind}
