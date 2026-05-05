@@ -75,6 +75,19 @@
 .scratch-slot--block {
   @apply rounded-md bg-white/20 ring-1 ring-slate-200/30;
 }
+.scratch-slot--nested-logical {
+  @apply gap-0.5 bg-white/10 ring-white/25;
+}
+.scratch-slot--boolean.scratch-slot--block.scratch-slot--nested-logical {
+  @apply rounded-full px-1.5 py-0.5;
+  clip-path: none;
+}
+.scratch-nested-group-mark {
+  @apply text-white/90 font-bold px-0.5;
+}
+.scratch-inline-block--nested {
+  @apply ring-1 ring-white/35 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)];
+}
 .scratch-block-item-field {
   @apply inline-flex items-center rounded-lg bg-white/25 px-2 py-1 text-xs font-medium text-white/95 ring-1 ring-white/15;
 }

@@ -282,10 +282,10 @@ defmodule ScratchInspector.Parser do
       next: Map.get(block, "next"),
       mutation: Map.get(block, "mutation", %{}),
       fields: normalize_detail_fields(fields),
-      inputs: normalize_detail_inputs(inputs, blocks),
+      inputs: normalize_detail_inputs(inputs, blocks, opcode),
       children: normalize_detail_children(inputs, blocks),
       label: render_block_label(block),
-      parts: render_block_parts(fields, inputs, blocks),
+      parts: render_block_parts(fields, inputs, blocks, opcode),
       branches: render_block_branches(inputs, blocks)
     }
   end
@@ -301,7 +301,7 @@ defmodule ScratchInspector.Parser do
     end)
   end
 
-  defp normalize_detail_inputs(inputs, blocks) do
+  defp normalize_detail_inputs(inputs, blocks, parent_opcode) do
     inputs
     |> Enum.reject(fn {key, _} ->
       String.starts_with?(key, "SUBSTACK") or key == "custom_block"
@@ -311,30 +311,40 @@ defmodule ScratchInspector.Parser do
       %{
         name: key,
         slot: input_slot_shape(key, value, blocks),
-        value: normalize_detail_input_value(value, blocks)
+        value: normalize_detail_input_value(value, blocks, parent_opcode, key)
       }
     end)
   end
 
-  defp normalize_detail_input_value([_, second], blocks), do: normalize_detail_input_atom(second, blocks)
-  defp normalize_detail_input_value([_, second, _fallback], blocks), do: normalize_detail_input_atom(second, blocks)
-  defp normalize_detail_input_value(_, _blocks), do: nil
+  defp normalize_detail_input_value([_, second], blocks, parent_opcode, input_name),
+    do: normalize_detail_input_atom(second, blocks, parent_opcode, input_name)
 
-  defp normalize_detail_input_atom([type, value | _], _blocks) when is_binary(value) or is_number(value) do
+  defp normalize_detail_input_value([_, second, _fallback], blocks, parent_opcode, input_name),
+    do: normalize_detail_input_atom(second, blocks, parent_opcode, input_name)
+
+  defp normalize_detail_input_value(_, _blocks, _parent_opcode, _input_name), do: nil
+
+  defp normalize_detail_input_atom([type, value | _], _blocks, _parent_opcode, _input_name) when is_binary(value) or is_number(value) do
     %{kind: :literal, input_type: type, value: to_string(value)}
   end
 
-  defp normalize_detail_input_atom(id, blocks) when is_binary(id) do
+  defp normalize_detail_input_atom(id, blocks, parent_opcode, input_name) when is_binary(id) do
     case Map.get(blocks, id) do
       block when is_map(block) ->
-        %{kind: :block, block: build_detail_block(id, block, blocks)}
+        child_detail_block = build_detail_block(id, block, blocks)
+
+        %{
+          kind: :block,
+          nested_logical: nested_logical_input?(parent_opcode, input_name, child_detail_block),
+          block: child_detail_block
+        }
 
       _ ->
         %{kind: :literal, value: "?"}
     end
   end
 
-  defp normalize_detail_input_atom(_, _blocks), do: nil
+  defp normalize_detail_input_atom(_, _blocks, _parent_opcode, _input_name), do: nil
 
   defp normalize_detail_children(inputs, blocks) do
     inputs
@@ -359,7 +369,7 @@ defmodule ScratchInspector.Parser do
     end
   end
 
-  defp render_block_parts(fields, inputs, blocks) do
+  defp render_block_parts(fields, inputs, blocks, parent_opcode) do
     field_parts =
       fields
       |> Enum.sort_by(fn {key, _} -> key end)
@@ -373,7 +383,11 @@ defmodule ScratchInspector.Parser do
       |> Enum.reject(fn {key, _} -> String.starts_with?(key, "SUBSTACK") || key == "custom_block" end)
       |> Enum.sort_by(fn {key, _} -> key end)
       |> Enum.map(fn {key, value} ->
-        %{name: key, slot: input_slot_shape(key, value, blocks), value: render_input_value(value, blocks)}
+        %{
+          name: key,
+          slot: input_slot_shape(key, value, blocks),
+          value: render_input_value(value, blocks, parent_opcode, key)
+        }
       end)
       |> Enum.reject(fn part -> is_nil(part.value) or part.value == "" end)
 
@@ -399,24 +413,44 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("DIRECTION", "any"), do: "どれかの向き"
   defp normalize_field_value(_field_name, value), do: value
 
-  defp render_input_value([_, second], blocks), do: render_input_atom(second, blocks)
-  defp render_input_value([_, second, _fallback], blocks), do: render_input_atom(second, blocks)
-  defp render_input_value(_, _blocks), do: nil
+  defp render_input_value([_, second], blocks, parent_opcode, input_name),
+    do: render_input_atom(second, blocks, parent_opcode, input_name)
 
-  defp render_input_atom([_type, value | _], _blocks) when is_binary(value), do: value
-  defp render_input_atom([_type, value | _], _blocks) when is_number(value), do: to_string(value)
+  defp render_input_value([_, second, _fallback], blocks, parent_opcode, input_name),
+    do: render_input_atom(second, blocks, parent_opcode, input_name)
 
-  defp render_input_atom(id, blocks) when is_binary(id) do
+  defp render_input_value(_, _blocks, _parent_opcode, _input_name), do: nil
+
+  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name) when is_binary(value), do: value
+  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name) when is_number(value), do: to_string(value)
+
+  defp render_input_atom(id, blocks, parent_opcode, input_name) when is_binary(id) do
     case Map.get(blocks, id) do
       block when is_map(block) ->
-        %{kind: :block, block: build_render_block(id, block, blocks)}
+        child_render_block = build_render_block(id, block, blocks)
+
+        %{
+          kind: :block,
+          nested_logical: nested_logical_input?(parent_opcode, input_name, child_render_block),
+          block: child_render_block
+        }
 
       _ ->
         "?"
     end
   end
 
-  defp render_input_atom(_, _blocks), do: nil
+  defp render_input_atom(_, _blocks, _parent_opcode, _input_name), do: nil
+
+  defp nested_logical_input?(parent_opcode, _input_name, child_block) when is_map(child_block) do
+    logical_boolean_opcode?(parent_opcode) and logical_boolean_opcode?(Map.get(child_block, :opcode))
+  end
+
+  defp nested_logical_input?(_, _, _), do: false
+
+  defp logical_boolean_opcode?(opcode) do
+    opcode in ["operator_and", "operator_or", "operator_not"]
+  end
 
   defp render_block_branches(inputs, blocks) do
     inputs
@@ -546,10 +580,10 @@ defmodule ScratchInspector.Parser do
       next: next_id,
       mutation: mutation,
       fields: normalize_detail_fields(fields),
-      inputs: normalize_detail_inputs(inputs, blocks),
+      inputs: normalize_detail_inputs(inputs, blocks, "procedures_definition"),
       children: normalize_detail_children(inputs, blocks),
       label: Map.get(mutation, "proccode", "custom block"),
-      parts: render_block_parts(fields, inputs, blocks),
+      parts: render_block_parts(fields, inputs, blocks, "procedures_definition"),
       branches: render_block_branches(inputs, blocks)
     }
   end

@@ -142,7 +142,11 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
         <%= if inline_block_without_slot_wrapper?(@item) do %>
           <.scratch_inline_block block={@item.value.block} />
         <% else %>
-          <span class={@item_class}><.scratch_inline_block block={@item.value.block} /></span>
+          <span class={@item_class}>
+            <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">(</span>
+            <.scratch_inline_block block={@item.value.block} nested={Map.get(@item.value, :nested_logical, false)} />
+            <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">)</span>
+          </span>
         <% end %>
       <% :input -> %><span class={@item_class}>{scratch_input_text(@item.value)}</span>
     <% end %>
@@ -150,6 +154,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   end
 
   attr :block, :map, required: true
+  attr :nested, :boolean, default: false
   def scratch_inline_block(assigns) do
     assigns =
       assigns
@@ -158,9 +163,10 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
       |> assign(:items, scratch_block_items(assigns.block) |> annotate_items(assigns.block))
       |> assign(:show_extension_icon, assigns.block.category == :extension)
       |> assign(:microbit_icon_uri, @microbit_icon_uri)
+      |> assign(:nested_class, if(assigns.nested, do: "scratch-inline-block--nested", else: nil))
 
     ~H"""
-    <span class={["scratch-inline-block", @category_class, @shape_class]}>
+    <span class={["scratch-inline-block", @category_class, @shape_class, @nested_class]}>
       <img :if={@show_extension_icon} src={@microbit_icon_uri} alt="" class="h-4 w-4 shrink-0" />
       <%= for item <- @items do %>
         <.scratch_block_item item={item} />
@@ -173,6 +179,8 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   defp scratch_block_item_class(%{kind: :definition_name}), do: "scratch-block-item-definition-name"
   defp scratch_block_item_class(%{kind: :field}), do: "scratch-block-item-field"
   defp scratch_block_item_class(%{kind: :input, name: "BROADCAST_INPUT"}), do: "scratch-block-item-field"
+  defp scratch_block_item_class(%{kind: :input, value: %{kind: :block, nested_logical: true}, slot: slot}),
+    do: "#{scratch_slot_class(slot, :block)} scratch-slot--nested-logical"
   defp scratch_block_item_class(%{kind: :input, value: %{kind: :block}, slot: slot}), do: scratch_slot_class(slot, :block)
   defp scratch_block_item_class(%{kind: :input, slot: slot, value: value}) do
     [scratch_slot_class(slot, :literal), scratch_input_semantic_class(value), scratch_slot_category_semantic_class(slot, value, :input)]
