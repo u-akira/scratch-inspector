@@ -156,10 +156,17 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   attr :block, :map, required: true
   attr :nested, :boolean, default: false
   def scratch_inline_block(assigns) do
+    shape_class =
+      if assigns.block.opcode == "looks_costume" do
+        nil
+      else
+        inline_shape_class(assigns.block.shape)
+      end
+
     assigns =
       assigns
       |> assign(:category_class, scratch_category_class(assigns.block.category))
-      |> assign(:shape_class, inline_shape_class(assigns.block.shape))
+      |> assign(:shape_class, shape_class)
       |> assign(:items, scratch_block_items(assigns.block) |> annotate_items(assigns.block))
       |> assign(:show_extension_icon, assigns.block.category == :extension)
       |> assign(:microbit_icon_uri, @microbit_icon_uri)
@@ -177,6 +184,8 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
 
   defp scratch_block_item_class(%{kind: :label}), do: "scratch-block-item-label"
   defp scratch_block_item_class(%{kind: :definition_name}), do: "scratch-block-item-definition-name"
+  defp scratch_block_item_class(%{kind: :field, parent_opcode: "looks_costume"}),
+    do: "scratch-block-item-field scratch-slot--round"
   defp scratch_block_item_class(%{kind: :field}), do: "scratch-block-item-field"
   defp scratch_block_item_class(%{kind: :input, name: "BROADCAST_INPUT"}), do: "scratch-block-item-field"
   defp scratch_block_item_class(%{kind: :input, value: %{kind: :block, nested_logical: true}, slot: slot}),
@@ -199,6 +208,8 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   defp scratch_input_semantic_class(_), do: nil
   defp scratch_slot_category_semantic_class(:round, %{parent_category: :event}, :input), do: "scratch-slot--event-literal"
   defp scratch_slot_category_semantic_class(_, _, _), do: nil
+  defp annotate_items(items, %{category: category, opcode: opcode}) when is_list(items),
+    do: Enum.map(items, &( &1 |> Map.put(:parent_category, category) |> Map.put(:parent_opcode, opcode)))
   defp annotate_items(items, %{category: category}) when is_list(items), do: Enum.map(items, &Map.put(&1, :parent_category, category))
   defp annotate_items(items, _), do: items
 
@@ -260,6 +271,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   defp scratch_child_name("SUBSTACK2"), do: "else"
   defp scratch_child_name(_), do: nil
   defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "sound_sounds_menu"}}}), do: true
+  defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "looks_costume"}}}), do: true
   defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{shape: shape}}}) when shape in [:round, :reporter_round], do: true
   defp inline_block_without_slot_wrapper?(_), do: false
   defp c_block_join_class(%{shape: :c_block, children: children}) when is_list(children), do: if(Enum.any?(children), do: "scratch-c-block-head-joined", else: nil)

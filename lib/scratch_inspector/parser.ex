@@ -56,7 +56,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("looks_gotofrontback"), do: "[FRONT_BACK] へ移動する"
   defp opcode_label("looks_goforwardbackwardlayers"), do: "[FORWARD_BACKWARD] [NUM] 層移動する"
   defp opcode_label("looks_costumenumbername"), do: "コスチュームの [NUMBER_NAME]"
-  defp opcode_label("looks_costume"), do: "コスチュームを [COSTUME] にする"
+  defp opcode_label("looks_costume"), do: "[COSTUME]"
   defp opcode_label("looks_switchcostumeto"), do: "コスチュームを [COSTUME] にする"
   defp opcode_label("looks_nextcostume"), do: "次のコスチュームにする"
   defp opcode_label("looks_switchbackdropto"), do: "背景を [BACKDROP] にする"
