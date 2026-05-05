@@ -168,7 +168,11 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
       |> assign(:category_class, scratch_category_class(assigns.block.category))
       |> assign(:shape_class, shape_class)
       |> assign(:items, scratch_block_items(assigns.block) |> annotate_items(assigns.block))
-      |> assign(:show_extension_icon, assigns.block.category == :extension)
+      |> assign(
+        :show_extension_icon,
+        assigns.block.category == :extension and
+          assigns.block.opcode not in ["microbit_menu_buttons", "microbit_menu_tiltDirectionAny"]
+      )
       |> assign(:microbit_icon_uri, @microbit_icon_uri)
       |> assign(:nested_class, if(assigns.nested, do: "scratch-inline-block--nested", else: nil))
 
@@ -228,8 +232,18 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
     if is_binary(label) and label != "", do: BlockLabelItems.parse(label, block.fields || %{}, block.inputs || %{}), else: []
   end
 
-  defp detail_block_label(label) when is_binary(label), do: String.trim_leading(label)
+  defp detail_block_label(label) when is_binary(label) do
+    label
+    |> String.trim_leading()
+    |> normalize_extension_menu_label()
+  end
   defp detail_block_label(label), do: label
+
+  # Fallback normalization for extension menu reporter labels.
+  # Some projects expose opcode text directly as label.
+  defp normalize_extension_menu_label("microbit_menu_buttons"), do: "[BTN]"
+  defp normalize_extension_menu_label("microbit_menu_tiltDirectionAny"), do: "[DIRECTION]"
+  defp normalize_extension_menu_label(label), do: label
   defp scratch_category_class(:motion), do: "bg-[#4C97FF]"
   defp scratch_category_class(:looks), do: "bg-[#9966FF]"
   defp scratch_category_class(:sound), do: "bg-[#CF63CF]"
@@ -272,6 +286,8 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   defp scratch_child_name(_), do: nil
   defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "sound_sounds_menu"}}}), do: true
   defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "looks_costume"}}}), do: true
+  defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "microbit_menu_buttons"}}}), do: true
+  defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "microbit_menu_tiltDirectionAny"}}}), do: true
   defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{shape: shape}}}) when shape in [:round, :reporter_round], do: true
   defp inline_block_without_slot_wrapper?(_), do: false
   defp c_block_join_class(%{shape: :c_block, children: children}) when is_list(children), do: if(Enum.any?(children), do: "scratch-c-block-head-joined", else: nil)

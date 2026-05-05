@@ -15,8 +15,8 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItems do
   defp part_to_item(part, fields, inputs) do
     case Regex.run(@placeholder_capture, part) do
       [_, placeholder] ->
-        field = resolve_by_name(fields, placeholder)
-        input = resolve_by_name(inputs, placeholder)
+        field = resolve_with_alias(fields, placeholder)
+        input = resolve_with_alias(inputs, placeholder)
 
         case normalize_field_item(placeholder, field) || normalize_input_item(placeholder, input) do
           nil -> %{kind: :label, value: part}
@@ -79,6 +79,16 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItems do
   end
 
   defp resolve_by_name(_, _), do: nil
+
+  # micro:bit menu blocks sometimes expose lowercase field names (e.g. "buttons")
+  # while labels use uppercase placeholders ("[BTN]").
+  defp resolve_with_alias(collection, name) do
+    resolve_by_name(collection, name) || resolve_by_name(collection, placeholder_alias(name))
+  end
+
+  defp placeholder_alias("BTN"), do: "buttons"
+  defp placeholder_alias("DIRECTION"), do: "tiltDirectionAny"
+  defp placeholder_alias(name), do: name
 
   defp entry_name(entry) when is_map(entry) do
     Map.get(entry, :name) || Map.get(entry, "name")

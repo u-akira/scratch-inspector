@@ -143,6 +143,8 @@ defmodule ScratchInspector.Parser do
   # micro:bit extension
   defp opcode_label("microbit_whenButtonPressed"), do: "ボタン[BTN]が押されたとき"
   defp opcode_label("microbit_isButtonPressed"), do: "ボタン[BTN]が押された"
+  defp opcode_label("microbit_menu_buttons"), do: "[BTN]"
+  defp opcode_label("microbit_menu_tiltDirectionAny"), do: "[DIRECTION]"
   defp opcode_label("microbit_whenGesture"), do: "[GESTURE]とき"
   defp opcode_label("microbit_displaySymbol"), do: "[MATRIX]を表示する"
   defp opcode_label("microbit_displayText"), do: "[TEXT]を表示する"
@@ -404,6 +406,8 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("STOP_OPTION", "this script"), do: "このスクリプトを止める"
   defp normalize_field_value("STOP_OPTION", "other scripts in sprite"), do: "スプライトの他のスクリプトを止める"
   defp normalize_field_value("BTN", "any"), do: "どれかの"
+  defp normalize_field_value("buttons", value), do: normalize_field_value("BTN", value)
+  defp normalize_field_value("tiltDirectionAny", value), do: normalize_field_value("DIRECTION", value)
   defp normalize_field_value("GESTURE", "moved"), do: "動いた"
   defp normalize_field_value("GESTURE", "shaken"), do: "振られた"
   defp normalize_field_value("GESTURE", "jumped"), do: "ジャンプした"
