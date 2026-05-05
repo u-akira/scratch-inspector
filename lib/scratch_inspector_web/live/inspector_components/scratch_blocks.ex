@@ -142,11 +142,9 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
         <%= if inline_block_without_slot_wrapper?(@item) do %>
           <.scratch_inline_block block={@item.value.block} />
         <% else %>
-          <span class={@item_class}>
-            <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">(</span>
-            <.scratch_inline_block block={@item.value.block} nested={Map.get(@item.value, :nested_logical, false)} />
-            <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">)</span>
-          </span>
+          <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">(</span>
+          <.scratch_inline_block block={@item.value.block} nested={Map.get(@item.value, :nested_logical, false)} />
+          <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">)</span>
         <% end %>
       <% :input -> %><span class={@item_class}>{scratch_input_text(@item.value)}</span>
     <% end %>

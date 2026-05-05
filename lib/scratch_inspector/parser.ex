@@ -82,6 +82,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("control_for_each"), do: "[VARIABLE] を [VALUE] から [VALUE2] まで使う"
   defp opcode_label("control_start_as_clone"), do: "クローンされたとき"
   defp opcode_label("control_create_clone_of"), do: "[CLONE_OPTION] のクローンを作る"
+  defp opcode_label("control_create_clone_of_menu"), do: "[CLONE_OPTION]"
   defp opcode_label("control_delete_this_clone"), do: "このクローンを削除する"
   defp opcode_label("sensing_touchingobject"), do: "[TOUCHINGOBJECTMENU] に触れた"
   defp opcode_label("sensing_touchingobjectmenu"), do: "[TOUCHINGOBJECTMENU]"
@@ -418,6 +419,8 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("DIRECTION", "any"), do: "どれかの向き"
   defp normalize_field_value("TOUCHINGOBJECTMENU", "_mouse_"), do: "マウスのポインター"
   defp normalize_field_value("TOUCHINGOBJECTMENU", "_edge_"), do: "端"
+  defp normalize_field_value("CLONE_OPTION", "_myself_"), do: "自分自身"
+  defp normalize_field_value("CLONE_OPTION", "myself"), do: "自分自身"
   defp normalize_field_value(_field_name, value), do: value
 
   defp render_input_value([_, second], blocks, parent_opcode, input_name),
