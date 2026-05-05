@@ -1,5 +1,13 @@
 # Scratch Inspector
 
+## Encoding Note (VSCode)
+
+To avoid Elixir compile errors caused by BOM (`U+FEFF`), this repository assumes UTF-8 without BOM.
+
+- VSCode workspace default encoding is fixed to `utf8` in `.vscode/settings.json`.
+- `.editorconfig` also declares `charset = utf-8` for text files.
+- Please keep Elixir-related files (`.ex`, `.exs`, `.heex`) as UTF-8 without BOM.
+
 > Implementation note:
 > Flow detail data is now resolved by `lib/scratch_inspector_web/live/flow_detail_view_model.ex`.
 > `InspectorLive` keeps UI state, while detail-display resolution is being split into that ViewModel for the staged `scratch-gui` alignment work.
