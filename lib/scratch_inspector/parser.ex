@@ -421,6 +421,8 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("TOUCHINGOBJECTMENU", "_edge_"), do: "端"
   defp normalize_field_value("CLONE_OPTION", "_myself_"), do: "自分自身"
   defp normalize_field_value("CLONE_OPTION", "myself"), do: "自分自身"
+  defp normalize_field_value("FRONT_BACK", "front"), do: "最前面"
+  defp normalize_field_value("FRONT_BACK", "back"), do: "最背面"
   defp normalize_field_value(_field_name, value), do: value
 
   defp render_input_value([_, second], blocks, parent_opcode, input_name),
