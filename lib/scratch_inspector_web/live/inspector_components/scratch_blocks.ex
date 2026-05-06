@@ -103,7 +103,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
               <%= for child <- @block.children do %>
                 <div class="mb-2 last:mb-0">
                   <%= if child_name = scratch_child_name(child.name) do %>
-                    <div class="scratch-block-child-label">{child_name}</div>
+                    <div class="scratch-block-child-label scratch-block-child-label--c-block">{child_name}</div>
                   <% end %>
                   <.scratch_stack blocks={child.blocks} />
                 </div>
@@ -280,7 +280,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
   defp scratch_child_container_class(:c_block), do: "ml-5 mt-1.5 w-[calc(100%-1rem)] min-w-[14rem] rounded-b-[1.25rem] bg-inherit pr-1"
   defp scratch_child_container_class(_), do: "ml-5 mt-1.5 w-[calc(100%-1rem)] min-w-[14rem]"
   defp scratch_child_name("SUBSTACK"), do: nil
-  defp scratch_child_name("SUBSTACK2"), do: "else"
+  defp scratch_child_name("SUBSTACK2"), do: "でなければ"
   defp scratch_child_name(_), do: nil
   defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "sound_sounds_menu"}}}), do: true
   defp inline_block_without_slot_wrapper?(%{kind: :input, value: %{kind: :block, block: %{opcode: "looks_costume"}}}), do: true
