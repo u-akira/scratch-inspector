@@ -25,7 +25,9 @@ window.__mermaidNodeClick = function (arg1, arg2) {
   if (!payload) return
 
   try {
-    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/")
+    const b64Raw = payload.replace(/-/g, "+").replace(/_/g, "/")
+    const paddingLength = (4 - (b64Raw.length % 4)) % 4
+    const b64 = b64Raw + "=".repeat(paddingLength)
     const decoded = decodeURIComponent(
       atob(b64)
         .split("")

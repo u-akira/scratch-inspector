@@ -1,5 +1,6 @@
 defmodule ScratchInspectorWeb.InspectorLive do
   use ScratchInspectorWeb, :live_view
+  require Logger
   alias ScratchInspectorWeb.FlowDetailViewModel
   alias ScratchInspectorWeb.Live.InspectorComponents.Assets, as: AssetsComponents
   alias ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks, as: ScratchBlocksComponents
@@ -36,6 +37,12 @@ defmodule ScratchInspectorWeb.InspectorLive do
   @impl true
   def handle_event(event, params, socket) do
     InspectorEvents.handle(event, params, socket)
+  end
+
+  @impl true
+  def handle_info({:upload_parse_finished, parse_result, name, temp_path}, socket) do
+    Logger.info("[upload] handle_info received name=#{name} result=#{elem(parse_result, 0)}")
+    {:noreply, ScratchInspectorWeb.Live.InspectorUpload.finish(socket, parse_result, name, temp_path)}
   end
 
   # ---- helpers ----

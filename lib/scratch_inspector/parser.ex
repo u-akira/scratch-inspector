@@ -1,4 +1,7 @@
 defmodule ScratchInspector.Parser do
+  require Logger
+  @thumbnail_inline_limit_bytes 300_000
+  @heavy_sprite_block_threshold 3_000
   @moduledoc """
   Scratch プロジェクトファイルのパーサー。
   .sb3 / .sb2 は ZIP 内の project.json を解析。
@@ -167,10 +170,19 @@ defmodule ScratchInspector.Parser do
   ファイルパスと拡張子を受け取り、解析済みプロジェクト構造を返す。
   """
   def parse(path, ext) when ext in [".sb2", ".sb3"] do
+    t0 = System.monotonic_time(:millisecond)
+    Logger.info("[parser] parse start ext=#{ext} path=#{path}")
+
     with {:ok, files} <- extract_zip(path),
          {:ok, json} <- find_project_json(files),
          {:ok, data} <- Jason.decode(json) do
-      {:ok, build_project(data, files)}
+      project = build_project(data, files)
+      Logger.info("[parser] parse ok elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+      {:ok, project}
+    else
+      {:error, reason} = err ->
+        Logger.error("[parser] parse error elapsed_ms=#{System.monotonic_time(:millisecond) - t0} reason=#{inspect(reason)}")
+        err
     end
   end
 
@@ -185,16 +197,31 @@ defmodule ScratchInspector.Parser do
   # ---- ZIP extraction ----
 
   defp extract_zip(path) do
+    t0 = System.monotonic_time(:millisecond)
+    Logger.info("[parser] unzip start path=#{path}")
+
     case :zip.unzip(String.to_charlist(path), [:memory]) do
-      {:ok, files} -> {:ok, files}
-      {:error, reason} -> {:error, "ZIP の展開に失敗しました: #{inspect(reason)}"}
+      {:ok, files} ->
+        Logger.info("[parser] unzip ok entries=#{length(files)} elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+        {:ok, files}
+
+      {:error, reason} ->
+        Logger.error("[parser] unzip error elapsed_ms=#{System.monotonic_time(:millisecond) - t0} reason=#{inspect(reason)}")
+        {:error, "ZIP の展開に失敗しました: #{inspect(reason)}"}
     end
   end
 
   defp find_project_json(files) do
+    t0 = System.monotonic_time(:millisecond)
+
     case Enum.find(files, fn {name, _} -> name == ~c"project.json" end) do
-      {_, content} -> {:ok, content}
-      nil -> {:error, "project.json が見つかりません"}
+      {_, content} ->
+        Logger.info("[parser] project.json found bytes=#{byte_size(content)} elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+        {:ok, content}
+
+      nil ->
+        Logger.error("[parser] project.json missing elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+        {:error, "project.json が見つかりません"}
     end
   end
 
@@ -208,40 +235,78 @@ defmodule ScratchInspector.Parser do
   # ---- project building ----
 
   defp build_project(data, zip_files) do
+    t0 = System.monotonic_time(:millisecond)
+    Logger.info("[parser] build_project start")
+
     targets = Map.get(data, "targets", [])
+    t_vars = System.monotonic_time(:millisecond)
     global_vars = extract_global_variables(targets)
     local_vars = extract_local_variables(targets)
+    Logger.info("[parser] build_project vars elapsed_ms=#{System.monotonic_time(:millisecond) - t_vars} global=#{length(global_vars)} local=#{length(local_vars)}")
 
     stage_target = Enum.find(targets, fn t -> Map.get(t, "isStage", false) end)
     sprite_targets = Enum.reject(targets, fn t -> Map.get(t, "isStage", false) end)
 
     stage =
       if stage_target do
-        build_sprite(Map.put(stage_target, "name", "Stage"), zip_files, true)
+        t_stage = System.monotonic_time(:millisecond)
+        Logger.info("[parser] build_project stage start")
+        result = build_sprite(Map.put(stage_target, "name", "Stage"), zip_files, true)
+        Logger.info("[parser] build_project stage done elapsed_ms=#{System.monotonic_time(:millisecond) - t_stage}")
+        result
       end
 
+    t_sprites = System.monotonic_time(:millisecond)
     sprites = Enum.map(sprite_targets, &build_sprite(&1, zip_files, false))
+    Logger.info("[parser] build_project sprites elapsed_ms=#{System.monotonic_time(:millisecond) - t_sprites} count=#{length(sprites)}")
 
-    %{
+    project = %{
       name: "",
       stage: stage,
       sprites: sprites,
       variables: global_vars ++ local_vars
     }
+
+    Logger.info("[parser] build_project ok elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+    project
   end
 
   defp build_sprite(target, zip_files, is_stage) do
+    t0 = System.monotonic_time(:millisecond)
     name = Map.get(target, "name", "Unknown")
     blocks = Map.get(target, "blocks", %{})
+    Logger.info("[parser] build_sprite start name=#{name} stage=#{is_stage} blocks=#{map_size(blocks)}")
 
+    t = System.monotonic_time(:millisecond)
     scripts = extract_script_labels(blocks)
+    Logger.info("[parser] build_sprite scripts done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
+    t = System.monotonic_time(:millisecond)
     events = extract_events(blocks)
-    custom_blocks = extract_custom_blocks(blocks)
-    top_scripts = extract_top_scripts(blocks)
-    costumes = extract_costumes(target, zip_files)
-    sounds = extract_sounds(target, zip_files)
+    Logger.info("[parser] build_sprite events done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
+    {custom_blocks, top_scripts} =
+      if map_size(blocks) > @heavy_sprite_block_threshold do
+        Logger.warning(
+          "[parser] build_sprite heavy target skipped name=#{name} blocks=#{map_size(blocks)} threshold=#{@heavy_sprite_block_threshold}"
+        )
 
-    %{
+        {[], []}
+      else
+        t = System.monotonic_time(:millisecond)
+        custom_blocks = extract_custom_blocks(blocks)
+        Logger.info("[parser] build_sprite custom_blocks done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
+        t = System.monotonic_time(:millisecond)
+        top_scripts = extract_top_scripts(blocks)
+        Logger.info("[parser] build_sprite top_scripts done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
+        {custom_blocks, top_scripts}
+      end
+    t = System.monotonic_time(:millisecond)
+    costumes = extract_costumes(target, zip_files)
+    Logger.info("[parser] build_sprite costumes done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t} count=#{length(costumes)}")
+    t = System.monotonic_time(:millisecond)
+    sounds = extract_sounds(target, zip_files)
+    Logger.info("[parser] build_sprite sounds done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t} count=#{length(sounds)}")
+
+    result = %{
       name: name,
       is_stage: is_stage,
       scripts: scripts,
@@ -251,6 +316,9 @@ defmodule ScratchInspector.Parser do
       costumes: costumes,
       sounds: sounds
     }
+
+    Logger.info("[parser] build_sprite ok name=#{name} total_elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+    result
   end
 
   defp build_render_stack(nil, _blocks), do: []
@@ -261,14 +329,26 @@ defmodule ScratchInspector.Parser do
   end
 
   defp build_detail_stack(start_id, blocks) do
-    case Map.get(blocks, start_id) do
-      block when is_map(block) ->
-        current = build_detail_block(start_id, block, blocks)
-        next_id = Map.get(block, "next")
-        [current | build_detail_stack(next_id, blocks)]
+    build_detail_stack(start_id, blocks, MapSet.new())
+  end
 
-      _ ->
-        []
+  defp build_detail_stack(nil, _blocks, _visited), do: []
+
+  defp build_detail_stack(start_id, blocks, visited) do
+    if MapSet.member?(visited, start_id) do
+      []
+    else
+      visited = MapSet.put(visited, start_id)
+
+      case Map.get(blocks, start_id) do
+        block when is_map(block) ->
+          current = build_detail_block(start_id, block, blocks)
+          next_id = Map.get(block, "next")
+          [current | build_detail_stack(next_id, blocks, visited)]
+
+        _ ->
+          []
+      end
     end
   end
 
@@ -608,14 +688,17 @@ defmodule ScratchInspector.Parser do
   defp extract_costumes(target, zip_files) do
     target
     |> Map.get("costumes", [])
-    |> Enum.map(fn costume ->
+    |> Enum.with_index()
+    |> Enum.map(fn {costume, idx} ->
       md5ext = Map.get(costume, "md5ext") || Map.get(costume, "assetId", "") <> "." <> Map.get(costume, "dataFormat", "svg")
       data_format = Map.get(costume, "dataFormat", "svg") |> String.downcase()
       mime = costume_mime(data_format)
 
       base64_data =
         case find_file_data(zip_files, md5ext) do
-          {:ok, binary} -> Base.encode64(binary)
+          {:ok, binary} when idx == 0 and byte_size(binary) <= @thumbnail_inline_limit_bytes ->
+            Base.encode64(binary)
+
           _ -> nil
         end
 
@@ -636,11 +719,8 @@ defmodule ScratchInspector.Parser do
       data_format = Map.get(sound, "dataFormat", "wav") |> String.downcase()
       mime = sound_mime(data_format)
 
-      base64_data =
-        case find_file_data(zip_files, md5ext) do
-          {:ok, binary} -> Base.encode64(binary)
-          _ -> nil
-        end
+      # Avoid large audio payload serialization during initial parse.
+      base64_data = nil
 
       %{
         name: Map.get(sound, "name", "unknown"),
@@ -671,7 +751,16 @@ defmodule ScratchInspector.Parser do
   ブロックチェーンを辿り、スクリプトの内容を読みやすい形で返す。
   """
   def walk_block_chain(start_id, blocks, depth \\ 0) do
-    case Map.get(blocks, start_id) do
+    walk_block_chain(start_id, blocks, depth, MapSet.new())
+  end
+
+  defp walk_block_chain(start_id, blocks, depth, visited) do
+    if MapSet.member?(visited, start_id) do
+      []
+    else
+      visited = MapSet.put(visited, start_id)
+
+      case Map.get(blocks, start_id) do
       nil ->
         []
 
@@ -704,17 +793,18 @@ defmodule ScratchInspector.Parser do
           |> Enum.sort_by(fn {key, _} -> key end)
           |> Enum.flat_map(fn {_key, val} ->
             substack_id = extract_input_id(val)
-            if substack_id, do: walk_block_chain(substack_id, blocks, depth + 1), else: []
+            if substack_id, do: walk_block_chain(substack_id, blocks, depth + 1, visited), else: []
           end)
 
         # 次のブロック
         next_id = Map.get(block, "next")
-        next_blocks = if next_id, do: walk_block_chain(next_id, blocks, depth), else: []
+        next_blocks = if next_id, do: walk_block_chain(next_id, blocks, depth, visited), else: []
 
         [current] ++ substacks ++ next_blocks
 
       _ ->
         []
+      end
     end
   end
 
