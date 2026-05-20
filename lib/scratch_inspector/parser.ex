@@ -194,6 +194,58 @@ defmodule ScratchInspector.Parser do
     {:error, "未対応のファイル形式: #{ext}"}
   end
 
+  def enrich_deferred_sprite(%{deferred_analysis: true, raw_blocks: blocks} = sprite)
+      when is_map(blocks) do
+    custom_blocks = extract_custom_blocks(blocks)
+    top_scripts = extract_top_scripts(blocks)
+
+    sprite
+    |> Map.put(:custom_blocks, custom_blocks)
+    |> Map.put(:top_scripts, top_scripts)
+    |> Map.put(:deferred_analysis, false)
+    |> Map.delete(:raw_blocks)
+  end
+
+  def enrich_deferred_sprite(sprite), do: sprite
+
+  def enrich_deferred_sprite_fallback(%{deferred_analysis: true, raw_blocks: blocks} = sprite)
+      when is_map(blocks) do
+    top_scripts = extract_top_scripts_light(blocks)
+
+    sprite
+    |> Map.put(:top_scripts, top_scripts)
+    |> Map.put(:custom_blocks, [])
+    |> Map.put(:deferred_analysis, false)
+    |> Map.delete(:raw_blocks)
+  end
+
+  def enrich_deferred_sprite_fallback(sprite), do: sprite
+
+  defp extract_top_scripts_light(blocks) do
+    blocks
+    |> Enum.filter(fn {_id, block} ->
+      is_map(block) and is_nil(Map.get(block, "parent")) and Map.get(block, "topLevel", false) == true
+    end)
+    |> Enum.reject(fn {_id, block} ->
+      Map.get(block, "opcode") in ["procedures_definition", "procedures_prototype"]
+    end)
+    |> Enum.map(fn {id, block} ->
+      opcode = Map.get(block, "opcode", "")
+      value = extract_event_value(block)
+      label = event_label_from_opcode(opcode, value)
+
+      %{
+        id: id,
+        hat_label: label,
+        hat_opcode: opcode,
+        detail_header: nil,
+        detail_blocks: [],
+        blocks: [],
+        render_blocks: []
+      }
+    end)
+  end
+
   # ---- ZIP extraction ----
 
   defp extract_zip(path) do
@@ -283,13 +335,15 @@ defmodule ScratchInspector.Parser do
     t = System.monotonic_time(:millisecond)
     events = extract_events(blocks)
     Logger.info("[parser] build_sprite events done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
-    {custom_blocks, top_scripts} =
+    {custom_blocks, top_scripts, deferred_analysis, raw_blocks} =
       if map_size(blocks) > @heavy_sprite_block_threshold do
         Logger.warning(
           "[parser] build_sprite heavy target skipped name=#{name} blocks=#{map_size(blocks)} threshold=#{@heavy_sprite_block_threshold}"
         )
 
-        {[], []}
+        # Do not retain huge raw block maps in LiveView assigns.
+        # Build a lightweight flow surface and finish here.
+        {[], extract_top_scripts_light(blocks), false, nil}
       else
         t = System.monotonic_time(:millisecond)
         custom_blocks = extract_custom_blocks(blocks)
@@ -297,7 +351,7 @@ defmodule ScratchInspector.Parser do
         t = System.monotonic_time(:millisecond)
         top_scripts = extract_top_scripts(blocks)
         Logger.info("[parser] build_sprite top_scripts done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
-        {custom_blocks, top_scripts}
+        {custom_blocks, top_scripts, false, nil}
       end
     t = System.monotonic_time(:millisecond)
     costumes = extract_costumes(target, zip_files)
@@ -313,6 +367,8 @@ defmodule ScratchInspector.Parser do
       events: events,
       custom_blocks: custom_blocks,
       top_scripts: top_scripts,
+      deferred_analysis: deferred_analysis,
+      raw_blocks: raw_blocks,
       costumes: costumes,
       sounds: sounds
     }

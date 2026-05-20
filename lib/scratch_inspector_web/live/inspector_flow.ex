@@ -19,10 +19,7 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
       target.top_scripts
       |> Enum.filter(&event_hat?(&1.hat_opcode))
 
-    if Enum.empty?(scripts) do
-      nil
-    else
-      custom_blocks = target.custom_blocks
+    custom_blocks = target.custom_blocks
 
       script_nodes =
         scripts
@@ -159,8 +156,7 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
         |> Enum.reject(fn {from_id, to_id} -> is_nil(from_id) or is_nil(to_id) end)
         |> Enum.uniq()
 
-      render_flow_mermaid(nodes, edges, flow_detail)
-    end
+      if Enum.empty?(nodes), do: nil, else: render_flow_mermaid(nodes, edges, flow_detail)
   end
 
   defp blocks_called_by_script(custom_blocks, hat_label) do

@@ -1,5 +1,7 @@
 defmodule ScratchInspectorWeb.Live.InspectorEvents do
   alias ScratchInspectorWeb.Live.InspectorUpload
+  require Logger
+  @deferred_enrich_timeout_ms 20_000
 
   def handle("validate", _params, socket) do
     {:noreply, Phoenix.Component.assign(socket, :upload_error, nil)}
@@ -8,6 +10,8 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
   def handle("upload", _params, socket), do: InspectorUpload.process(socket)
 
   def handle("select_sprite", %{"name" => name, "type" => type}, socket) do
+    socket = maybe_enrich_deferred_target_async(socket, name, type)
+
     {:noreply,
      socket
      |> Phoenix.Component.assign(:selected_sprite, name)
@@ -107,4 +111,80 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
   end
 
   def flow_detail_same?(_, _), do: false
+
+  defp maybe_enrich_deferred_target_async(socket, name, type) do
+    project = socket.assigns.project
+
+    if is_nil(project) do
+      socket
+    else
+      case find_target(project, name, type) do
+        %{deferred_analysis: true} = target ->
+          parent = self()
+          Logger.info("[deferred] enriching target async start name=#{name} type=#{type}")
+
+          Task.start(fn ->
+            enriched = run_deferred_enrich_with_timeout(target, name, type)
+
+            send(parent, {:deferred_enrich_finished, name, type, enriched})
+          end)
+
+          socket
+          |> Phoenix.Component.assign(:processing, true)
+          |> Phoenix.Component.assign(:upload_error, nil)
+
+        _ ->
+          socket
+      end
+    end
+  end
+
+  defp find_target(project, name, "stage") do
+    if project.stage && project.stage.name == name, do: project.stage, else: nil
+  end
+
+  defp find_target(project, name, _type) do
+    Enum.find(project.sprites, &(&1.name == name))
+  end
+
+  defp replace_target(project, enriched, "stage") do
+    Map.put(project, :stage, enriched)
+  end
+
+  defp replace_target(project, enriched, _type) do
+    sprites =
+      Enum.map(project.sprites, fn sprite ->
+        if sprite.name == enriched.name, do: enriched, else: sprite
+      end)
+
+    Map.put(project, :sprites, sprites)
+  end
+
+  defp run_deferred_enrich_with_timeout(target, name, type) do
+    task =
+      Task.async(fn ->
+        try do
+          ScratchInspector.Parser.enrich_deferred_sprite(target)
+        rescue
+          e ->
+            {:error, Exception.message(e)}
+        end
+      end)
+
+    case Task.yield(task, @deferred_enrich_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:error, _} = err} ->
+        err
+
+      {:ok, enriched} ->
+        Logger.info("[deferred] enrich full success name=#{name} type=#{type}")
+        enriched
+
+      nil ->
+        Logger.warning(
+          "[deferred] enrich timeout fallback name=#{name} type=#{type} timeout_ms=#{@deferred_enrich_timeout_ms}"
+        )
+
+        ScratchInspector.Parser.enrich_deferred_sprite_fallback(target)
+    end
+  end
 end

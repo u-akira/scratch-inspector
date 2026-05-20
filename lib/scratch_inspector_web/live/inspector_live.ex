@@ -45,6 +45,41 @@ defmodule ScratchInspectorWeb.InspectorLive do
     {:noreply, ScratchInspectorWeb.Live.InspectorUpload.finish(socket, parse_result, name, temp_path)}
   end
 
+  @impl true
+  def handle_info({:deferred_enrich_finished, name, type, {:error, reason}}, socket) do
+    Logger.error("[deferred] enrich failed name=#{name} type=#{type} reason=#{reason}")
+
+    {:noreply,
+     socket
+     |> assign(:processing, false)
+     |> assign(:upload_error, "後解析に失敗しました: #{reason}")}
+  end
+
+  @impl true
+  def handle_info({:deferred_enrich_finished, name, type, enriched}, socket) do
+    Logger.info("[deferred] enrich finished name=#{name} type=#{type}")
+    project = socket.assigns.project
+
+    updated_project =
+      case type do
+        "stage" ->
+          Map.put(project, :stage, enriched)
+
+        _ ->
+          sprites =
+            Enum.map(project.sprites, fn sprite ->
+              if sprite.name == name, do: enriched, else: sprite
+            end)
+
+          Map.put(project, :sprites, sprites)
+      end
+
+    {:noreply,
+     socket
+     |> assign(:project, updated_project)
+     |> assign(:processing, false)}
+  end
+
   # ---- helpers ----
 
   defp current_target(project, name, _type) do
@@ -162,6 +197,13 @@ defmodule ScratchInspectorWeb.InspectorLive do
     <!-- Main UI -->
       <% else %>
         <div class="h-[calc(100vh-56px)] flex flex-col overflow-hidden">
+          <%= if @processing do %>
+            <div class="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs text-amber-800 flex items-center gap-2">
+              <span class="inline-block h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+              <span>解析中です。完了までしばらくお待ちください…</span>
+            </div>
+          <% end %>
+
           <!-- Sprite thumbnail strip -->
           <div class="bg-white border-b border-gray-200 flex gap-1 px-3 py-2 overflow-x-auto flex-shrink-0">
             <%= if @project.stage do %>
