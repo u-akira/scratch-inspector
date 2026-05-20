@@ -194,6 +194,16 @@ defmodule ScratchInspector.Parser do
     {:error, "未対応のファイル形式: #{ext}"}
   end
 
+  def enrich_project_costume_images_from_archive(project, path, ext) when ext in [".sb2", ".sb3"] do
+    with {:ok, files} <- extract_zip(path) do
+      {:ok, enrich_project_costume_images(project, files)}
+    end
+  end
+
+  def enrich_project_costume_images_from_archive(_project, _path, ext) do
+    {:error, "unsupported extension for costume enrich: #{ext}"}
+  end
+
   def enrich_deferred_sprite(%{deferred_analysis: true, raw_blocks: blocks} = sprite)
       when is_map(blocks) do
     custom_blocks = extract_custom_blocks(blocks)
@@ -323,6 +333,38 @@ defmodule ScratchInspector.Parser do
     project
   end
 
+  defp enrich_project_costume_images(project, zip_files) do
+    stage =
+      case project.stage do
+        nil -> nil
+        target -> enrich_target_costumes(target, zip_files)
+      end
+
+    sprites = Enum.map(project.sprites || [], &enrich_target_costumes(&1, zip_files))
+
+    project
+    |> Map.put(:stage, stage)
+    |> Map.put(:sprites, sprites)
+  end
+
+  defp enrich_target_costumes(target, zip_files) do
+    costumes =
+      Enum.map(target.costumes || [], fn costume ->
+        case Map.get(costume, :asset_file) do
+          nil ->
+            costume
+
+          filename ->
+            case find_file_data(zip_files, filename) do
+              {:ok, binary} -> Map.put(costume, :base64, Base.encode64(binary))
+              _ -> costume
+            end
+        end
+      end)
+
+    Map.put(target, :costumes, costumes)
+  end
+
   defp build_sprite(target, zip_files, is_stage) do
     t0 = System.monotonic_time(:millisecond)
     name = Map.get(target, "name", "Unknown")
@@ -377,16 +419,9 @@ defmodule ScratchInspector.Parser do
     result
   end
 
-  defp build_render_stack(nil, _blocks), do: []
-  defp build_detail_stack(nil, _blocks), do: []
+  defp build_render_stack(start_id, blocks), do: build_detail_stack(start_id, blocks)
 
-  defp build_render_stack(start_id, blocks) do
-    build_detail_stack(start_id, blocks)
-  end
-
-  defp build_detail_stack(start_id, blocks) do
-    build_detail_stack(start_id, blocks, MapSet.new())
-  end
+  defp build_detail_stack(start_id, blocks), do: build_detail_stack(start_id, blocks, MapSet.new())
 
   defp build_detail_stack(nil, _blocks, _visited), do: []
 
@@ -762,16 +797,16 @@ defmodule ScratchInspector.Parser do
         name: Map.get(costume, "name", "unknown"),
         data_format: data_format,
         mime: mime,
-        base64: base64_data
+        base64: base64_data,
+        asset_file: md5ext
       }
     end)
   end
 
-  defp extract_sounds(target, zip_files) do
+  defp extract_sounds(target, _zip_files) do
     target
     |> Map.get("sounds", [])
     |> Enum.map(fn sound ->
-      md5ext = Map.get(sound, "md5ext") || Map.get(sound, "assetId", "") <> "." <> Map.get(sound, "dataFormat", "wav")
       data_format = Map.get(sound, "dataFormat", "wav") |> String.downcase()
       mime = sound_mime(data_format)
 

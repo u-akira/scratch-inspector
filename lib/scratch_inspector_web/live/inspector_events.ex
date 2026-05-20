@@ -147,19 +147,6 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
     Enum.find(project.sprites, &(&1.name == name))
   end
 
-  defp replace_target(project, enriched, "stage") do
-    Map.put(project, :stage, enriched)
-  end
-
-  defp replace_target(project, enriched, _type) do
-    sprites =
-      Enum.map(project.sprites, fn sprite ->
-        if sprite.name == enriched.name, do: enriched, else: sprite
-      end)
-
-    Map.put(project, :sprites, sprites)
-  end
-
   defp run_deferred_enrich_with_timeout(target, name, type) do
     task =
       Task.async(fn ->

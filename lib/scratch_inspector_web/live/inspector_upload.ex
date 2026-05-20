@@ -66,10 +66,23 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
   end
 
   def finish(socket, parse_result, name, temp_path) do
-    _ = File.rm(temp_path)
-
     case parse_result do
       {:ok, project} ->
+        parent = self()
+        ext = Path.extname(name) |> String.downcase()
+
+        Task.start(fn ->
+          enrich_result =
+            try do
+              ScratchInspector.Parser.enrich_project_costume_images_from_archive(project, temp_path, ext)
+            rescue
+              e -> {:error, Exception.message(e)}
+            end
+
+          _ = File.rm(temp_path)
+          send(parent, {:costume_assets_enriched, enrich_result})
+        end)
+
         Logger.info(
           "[upload] parse success name=#{name} stage=#{not is_nil(project.stage)} sprites=#{length(project.sprites)} vars=#{length(project.variables)}"
         )
@@ -83,6 +96,7 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
         |> assign(:expanded_variable_key, nil)
 
       {:error, reason} ->
+        _ = File.rm(temp_path)
         Logger.error("[upload] parse error name=#{name} reason=#{inspect(reason)}")
 
         socket

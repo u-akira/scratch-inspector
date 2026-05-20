@@ -46,6 +46,18 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   @impl true
+  def handle_info({:costume_assets_enriched, {:ok, enriched_project}}, socket) do
+    Logger.info("[assets] async costume enrich finished")
+    {:noreply, assign(socket, :project, enriched_project)}
+  end
+
+  @impl true
+  def handle_info({:costume_assets_enriched, {:error, reason}}, socket) do
+    Logger.warning("[assets] async costume enrich failed reason=#{inspect(reason)}")
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_info({:deferred_enrich_finished, name, type, {:error, reason}}, socket) do
     Logger.error("[deferred] enrich failed name=#{name} type=#{type} reason=#{reason}")
 
