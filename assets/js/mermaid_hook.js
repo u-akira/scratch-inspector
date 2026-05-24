@@ -24,22 +24,7 @@ window.__mermaidNodeClick = function (arg1, arg2) {
   const payload = typeof arg2 === "string" ? arg2 : typeof arg1 === "string" ? arg1 : null
   if (!payload) return
 
-  try {
-    const b64Raw = payload.replace(/-/g, "+").replace(/_/g, "/")
-    const paddingLength = (4 - (b64Raw.length % 4)) % 4
-    const b64 = b64Raw + "=".repeat(paddingLength)
-    const decoded = decodeURIComponent(
-      atob(b64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    )
-
-    const detail = JSON.parse(decoded)
-    window.__mermaidLiveHook.pushEvent("flow_select_detail", detail)
-  } catch (e) {
-    console.error("mermaid click decode error", e)
-  }
+  window.__mermaidLiveHook.pushDetailFromPayload(payload, "mermaid")
 }
 
 export const MermaidHook = {
@@ -47,29 +32,123 @@ export const MermaidHook = {
     this._lastChart = null
     this._scale = 1
     this._baseSize = null
+    this._diagramSvg = null
+    this._lastClickedNodeId = null
     this.viewport = this.el.querySelector('[data-role="viewport"]')
+    this.inlineDetail = this.el.querySelector('[data-role="flow-inline-detail"]')
     this.zoomLabel = this.el.querySelector("[data-zoom-label]")
     this.handleZoomClick = this.handleZoomClick.bind(this)
+    this.handleNodeClick = this.handleNodeClick.bind(this)
+    this.handleViewportScroll = this.positionInlineDetail.bind(this)
+    this.handleWindowResize = this.positionInlineDetail.bind(this)
 
     this.el.addEventListener("click", this.handleZoomClick)
+    this.viewport?.addEventListener("click", this.handleNodeClick)
+    this.viewport?.addEventListener("scroll", this.handleViewportScroll)
+    window.addEventListener("resize", this.handleWindowResize)
     window.__mermaidLiveHook = this
     this.renderDiagram()
   },
 
   updated() {
+    this.inlineDetail = this.el.querySelector('[data-role="flow-inline-detail"]')
     const chartDef = this.el.getAttribute("data-chart")
     if (chartDef !== this._lastChart) {
       this._scale = 1
       this.renderDiagram()
+      return
     }
+
+    this.positionInlineDetail()
   },
 
   destroyed() {
     this.el.removeEventListener("click", this.handleZoomClick)
+    this.viewport?.removeEventListener("click", this.handleNodeClick)
+    this.viewport?.removeEventListener("scroll", this.handleViewportScroll)
+    window.removeEventListener("resize", this.handleWindowResize)
 
     if (window.__mermaidLiveHook === this) {
       window.__mermaidLiveHook = null
     }
+  },
+
+  parsePayloadMap(chartDef) {
+    const map = new Map()
+    if (!chartDef) return map
+
+    const re = /^click\s+([^\s]+)\s+call\s+__mermaidNodeClick\("([^"]+)"\)/gm
+    let m
+    while ((m = re.exec(chartDef)) !== null) {
+      map.set(m[1], m[2])
+    }
+    return map
+  },
+
+  pushDetailFromPayload(payload, source = "fallback") {
+    if (!payload) return
+
+    const now = Date.now()
+    if (
+      this._lastPushedPayload === payload &&
+      now - (this._lastPushedAt || 0) < 250
+    ) {
+      return
+    }
+
+    this._lastPushedPayload = payload
+    this._lastPushedAt = now
+
+    try {
+      const b64Raw = payload.replace(/-/g, "+").replace(/_/g, "/")
+      const paddingLength = (4 - (b64Raw.length % 4)) % 4
+      const b64 = b64Raw + "=".repeat(paddingLength)
+      const decoded = decodeURIComponent(
+        atob(b64)
+          .split("")
+          .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+          .join("")
+      )
+      const detail = JSON.parse(decoded)
+      this.pushEvent("flow_select_detail", detail)
+    } catch (e) {
+      console.error("mermaid click decode error", e)
+    }
+  },
+
+  handleNodeClick(event) {
+    if (!this.viewport) return
+
+    let nodeId = null
+    const path = typeof event.composedPath === "function" ? event.composedPath() : []
+
+    for (const el of path) {
+      if (!el || typeof el !== "object") continue
+
+      const dataId =
+        typeof el.getAttribute === "function" ? el.getAttribute("data-id") : null
+      if (dataId) {
+        nodeId = dataId
+        break
+      }
+
+      const domId =
+        typeof el.getAttribute === "function" ? el.getAttribute("id") : null
+      if (!domId) continue
+
+      const m = domId.match(/^flowchart-(.+)-\d+$/)
+      if (m && m[1]) {
+        nodeId = m[1]
+        break
+      }
+    }
+
+    if (!nodeId || !this._payloadMap) return
+
+    this._lastClickedNodeId = nodeId
+    const payload = this._payloadMap.get(nodeId)
+    if (!payload) return
+    this.pushDetailFromPayload(payload, "fallback")
   },
 
   handleZoomClick(event) {
@@ -100,11 +179,91 @@ export const MermaidHook = {
   applyScale() {
     this.updateZoomLabel()
 
-    const svgEl = this.viewport?.querySelector("svg")
+    const svgEl = this._diagramSvg
     if (!svgEl || !this._baseSize) return
 
     svgEl.style.width = `${this._baseSize.width * this._scale}px`
     svgEl.style.height = `${this._baseSize.height * this._scale}px`
+    this.positionInlineDetail()
+  },
+
+  findSelectedNode(svgEl) {
+    const direct = svgEl.querySelector("g.node.selectedNode")
+    if (direct) return direct
+
+    const inner = svgEl.querySelector("g.node .selectedNode")
+    if (inner) return inner.closest("g.node")
+
+    // Fallback for Mermaid variants where selected class is attached elsewhere.
+    const loose = svgEl.querySelector(".selectedNode")
+    if (!loose) return null
+    return loose.closest("g[data-node='true']") || loose.closest("g.node")
+  },
+
+  positionInlineDetail() {
+    if (!this.viewport) return
+    const panel = this.inlineDetail
+    if (!panel) return
+
+    const svgEl = this._diagramSvg
+    let selectedNode = svgEl ? this.findSelectedNode(svgEl) : null
+    if (!selectedNode && svgEl && this._lastClickedNodeId) {
+      selectedNode = svgEl.querySelector(`g.node[data-id="${CSS.escape(this._lastClickedNodeId)}"]`)
+    }
+
+    if (!svgEl) {
+      panel.style.display = "none"
+      return
+    }
+
+    if (!selectedNode) {
+      // Keep detail visible even if selected node lookup fails.
+      panel.style.display = "block"
+      panel.style.visibility = "visible"
+      panel.style.left = `${this.viewport.scrollLeft + 8}px`
+      panel.style.top = `${this.viewport.scrollTop + 8}px`
+      return
+    }
+
+    const viewportRect = this.viewport.getBoundingClientRect()
+    const nodeRect = selectedNode.getBoundingClientRect()
+    const padding = 8
+    const viewportWidth = this.viewport.clientWidth
+    const panelWidth = Math.min(560, Math.max(260, viewportWidth - 16))
+    const desiredLeft =
+      this.viewport.scrollLeft + (nodeRect.left - viewportRect.left) + nodeRect.width / 2 - panelWidth / 2
+    const minLeft = this.viewport.scrollLeft + 8
+    const maxLeft = this.viewport.scrollLeft + Math.max(0, viewportWidth - panelWidth - 8)
+    const nextLeft = Math.max(minLeft, Math.min(desiredLeft, maxLeft))
+
+    // Measure panel height before clamping vertical position.
+    panel.style.width = `${panelWidth}px`
+    panel.style.left = `${nextLeft}px`
+    panel.style.top = "0px"
+    panel.style.visibility = "hidden"
+    panel.style.display = "block"
+    const panelHeight = panel.offsetHeight || 0
+
+    const viewportTop = this.viewport.scrollTop
+    const viewportBottom = viewportTop + this.viewport.clientHeight
+    const nodeBottomInViewport =
+      this.viewport.scrollTop + (nodeRect.bottom - viewportRect.top)
+    const nodeTopInViewport =
+      this.viewport.scrollTop + (nodeRect.top - viewportRect.top)
+
+    // Prefer below node, fallback to above node when it would be clipped.
+    const preferredTop = nodeBottomInViewport + padding
+    const aboveTop = nodeTopInViewport - panelHeight - padding
+    const fitsBelow = preferredTop + panelHeight <= viewportBottom - 4
+    const rawTop = fitsBelow ? preferredTop : aboveTop
+    const minTop = viewportTop + 4
+    const maxTop = Math.max(minTop, viewportBottom - panelHeight - 4)
+    const nextTop = Math.max(minTop, Math.min(rawTop, maxTop))
+
+    panel.style.left = `${nextLeft}px`
+    panel.style.top = `${nextTop}px`
+    panel.style.visibility = "visible"
+    panel.style.display = "block"
   },
 
   parseNodeTranslate(nodeEl) {
@@ -212,18 +371,29 @@ export const MermaidHook = {
 
     this._lastChart = chartDef
     this._baseSize = null
+    this._diagramSvg = null
+    const preservedDetail = this.viewport.querySelector('[data-role="flow-inline-detail"]')
     this.viewport.innerHTML = ""
+    if (preservedDetail) {
+      this.viewport.appendChild(preservedDetail)
+      this.inlineDetail = preservedDetail
+    }
     this.updateZoomLabel()
 
     const id = `mermaid-diagram-${diagramCounter++}`
+    this._payloadMap = this.parsePayloadMap(chartDef)
 
     try {
       const { svg, bindFunctions } = await mermaid.render(id, chartDef)
-      this.viewport.innerHTML = svg
-      if (bindFunctions) bindFunctions(this.viewport)
+      const diagramHost = document.createElement("div")
+      diagramHost.setAttribute("data-role", "diagram-host")
+      diagramHost.innerHTML = svg
+      this.viewport.appendChild(diagramHost)
+      if (bindFunctions) bindFunctions(diagramHost)
 
-      const svgEl = this.viewport.querySelector("svg")
+      const svgEl = diagramHost.querySelector("svg")
       if (svgEl) {
+        this._diagramSvg = svgEl
         this.forceHorizontalAnchors(svgEl)
 
         svgEl.style.maxWidth = "none"
@@ -233,11 +403,16 @@ export const MermaidHook = {
 
         this._baseSize = this.measureBaseSize(svgEl)
         this.applyScale()
+        this.positionInlineDetail()
       }
     } catch (e) {
       console.error("Mermaid render error:", e)
-      this.viewport.innerHTML =
-        `<p style="color: #ef4444; font-size: 0.75rem; padding: 8px;">Failed to render the diagram.</p>`
+      const err = document.createElement("p")
+      err.style.color = "#ef4444"
+      err.style.fontSize = "0.75rem"
+      err.style.padding = "8px"
+      err.textContent = "Failed to render the diagram."
+      this.viewport.appendChild(err)
     }
   },
 }

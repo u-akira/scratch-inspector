@@ -27,7 +27,16 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
         |> Enum.map(fn {script, idx} ->
           %{
             id: "script_#{idx}",
-            detail: flow_detail_payload(%{kind: "script", id: script.id}, target),
+            detail:
+              flow_detail_payload(
+                %{
+                  kind: "script",
+                  id: script.id,
+                  hat_opcode: script.hat_opcode,
+                  hat_label: script.hat_label
+                },
+                target
+              ),
             label: flow_node_label(script),
             class: :script,
             script: script

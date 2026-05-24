@@ -93,10 +93,14 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
 
   def normalize_flow_detail(detail) when is_map(detail) do
     %{
-      kind: Map.get(detail, :kind) || Map.get(detail, "kind"),
-      id: Map.get(detail, :id) || Map.get(detail, "id"),
+      kind: normalize_flow_detail_part(Map.get(detail, :kind) || Map.get(detail, "kind")),
+      id: normalize_flow_detail_part(Map.get(detail, :id) || Map.get(detail, "id")),
       sprite: Map.get(detail, :sprite) || Map.get(detail, "sprite"),
-      type: Map.get(detail, :type) || Map.get(detail, "type")
+      type: Map.get(detail, :type) || Map.get(detail, "type"),
+      hat_opcode:
+        normalize_flow_detail_part(Map.get(detail, :hat_opcode) || Map.get(detail, "hat_opcode")),
+      hat_label:
+        normalize_flow_detail_part(Map.get(detail, :hat_label) || Map.get(detail, "hat_label"))
     }
     |> then(fn normalized ->
       if is_binary(normalized.kind) and is_binary(normalized.id), do: normalized, else: nil
@@ -113,6 +117,13 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
   end
 
   def flow_detail_same?(_, _), do: false
+
+  defp normalize_flow_detail_part(nil), do: nil
+  defp normalize_flow_detail_part(value) when is_binary(value), do: value
+  defp normalize_flow_detail_part(value) when is_atom(value), do: Atom.to_string(value)
+  defp normalize_flow_detail_part(value) when is_integer(value), do: Integer.to_string(value)
+  defp normalize_flow_detail_part(value) when is_float(value), do: Float.to_string(value)
+  defp normalize_flow_detail_part(_), do: nil
 
   defp maybe_enrich_deferred_target_async(socket, name, type) do
     project = socket.assigns.project

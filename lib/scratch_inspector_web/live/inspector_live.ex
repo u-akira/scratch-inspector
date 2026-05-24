@@ -367,7 +367,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
               <div>
                 <h2 class="text-sm font-semibold text-gray-800">Flow Graph</h2>
                 
-                <p class="text-xs text-gray-500">Click a node to inspect its detail below.</p>
+                <p class="text-xs text-gray-500">Click a node to inspect inline detail.</p>
               </div>
                <span class="text-xs text-gray-400">{AssetsComponents.display_name(@target)}</span>
             </div>
@@ -408,12 +408,65 @@ defmodule ScratchInspectorWeb.InspectorLive do
                 </div>
                  <span data-zoom-label class="text-xs font-medium text-slate-500">100%</span>
               </div>
-               <div data-role="viewport" class="min-h-[360px] overflow-auto px-2 py-4" />
+               <div data-role="viewport" class="relative min-h-[360px] overflow-auto px-2 py-4">
+                <%= if @flow_detail do %>
+                  <div
+                    data-role="flow-inline-detail"
+                    class="absolute z-20 w-[min(560px,calc(100%-1rem))] border border-gray-200 rounded-xl overflow-hidden bg-white shadow-lg"
+                    style="display:none;"
+                  >
+                    <div class="absolute right-3 top-3 z-10">
+                      <button
+                        phx-click="flow_select_detail"
+                        phx-value-kind={@flow_detail.kind}
+                        phx-value-id={@flow_detail.id}
+                        phx-value-sprite={@flow_detail.sprite}
+                        phx-value-type={@flow_detail.type}
+                        class="text-gray-400 hover:text-gray-600 text-lg leading-none"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div class="p-4 bg-gray-50 max-h-[320px] overflow-auto">
+                      <%= if @detail_script do %>
+                        <%= if detail_blocks_present?(@detail_script) do %>
+                          <ScratchBlocksComponents.scratch_script_detail detail={@detail_script} />
+                        <% else %>
+                          <p class="text-xs text-gray-400 italic">ブロックなし</p>
+                          <p class="text-xs text-gray-400 italic">ブロックなし</p>
+                        <% end %>
+                      <% else %>
+                        <%= if Enum.any?(@detail_receivers || []) do %>
+                          <div class="space-y-2">
+                            <%= for receiver <- @detail_receivers do %>
+                              <button
+                                phx-click="flow_select_detail"
+                                phx-value-kind={receiver.detail.kind}
+                                phx-value-id={receiver.detail.id}
+                                phx-value-sprite={receiver.detail.sprite}
+                                phx-value-type={receiver.detail.type}
+                                class="flex items-center gap-3 w-full bg-white rounded-lg border border-gray-200 px-3 py-2 hover:bg-blue-50 hover:border-blue-200 transition text-left"
+                              >
+                                <AssetsComponents.sprite_thumbnail sprite={receiver.target} />
+                                <span class="text-xs font-medium text-gray-700">{AssetsComponents.display_name(receiver.target)}</span>
+                                <span class="text-xs text-gray-400">-></span>
+                                <span class="text-xs text-gray-600">{receiver.script.hat_label}</span>
+                              </button>
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <p class="text-xs text-gray-400 italic">このメッセージを受け取るスプライトはありません</p>
+                        <% end %>
+                      <% end %>
+                    </div>
+                  </div>
+                <% end %>
+               </div>
             </div>
           </div>
         <% end %>
         
-        <%= if @flow_detail && (@detail_script != nil || @detail_receivers != nil) do %>
+        <%= if false do %>
           <div class="relative border border-gray-200 rounded-xl overflow-hidden bg-white">
             <div class="absolute right-3 top-3 z-10">
               <button

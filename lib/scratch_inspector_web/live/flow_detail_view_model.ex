@@ -7,7 +7,11 @@ defmodule ScratchInspectorWeb.FlowDetailViewModel do
   def build(project, target, flow_detail) do
     case flow_detail do
       %{kind: "script", id: id} ->
-        case Enum.find(target.top_scripts, &(&1.id == id)) do
+        script =
+          Enum.find(target.top_scripts, &(to_string(&1.id) == id)) ||
+            find_script_by_hints(target.top_scripts, flow_detail)
+
+        case script do
           nil ->
             empty()
 
@@ -25,7 +29,7 @@ defmodule ScratchInspectorWeb.FlowDetailViewModel do
         end
 
       %{kind: "block_def", id: name} ->
-        case Enum.find(target.custom_blocks, &(&1.name == name)) do
+        case Enum.find(target.custom_blocks, &(to_string(&1.name) == name)) do
           nil ->
             empty()
 
@@ -96,4 +100,14 @@ defmodule ScratchInspectorWeb.FlowDetailViewModel do
 
   defp receiver_type(%{is_stage: true}), do: "stage"
   defp receiver_type(_), do: "sprite"
+
+  defp find_script_by_hints(scripts, flow_detail) do
+    hat_opcode = Map.get(flow_detail, :hat_opcode)
+    hat_label = Map.get(flow_detail, :hat_label)
+
+    Enum.find(scripts, fn script ->
+      (is_binary(hat_opcode) and script.hat_opcode == hat_opcode) and
+        (is_binary(hat_label) and script.hat_label == hat_label)
+    end)
+  end
 end
