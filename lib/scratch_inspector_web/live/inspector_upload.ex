@@ -91,6 +91,13 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
         |> assign(:project, Map.put(project, :name, name))
         |> assign(:selected_sprite, if(project.stage, do: project.stage.name, else: nil))
         |> assign(:selected_target_type, if(project.stage, do: "stage", else: nil))
+        |> assign(
+          :deferred_target,
+          if(project.stage && Map.get(project.stage, :deferred_analysis, false),
+            do: %{name: project.stage.name, type: "stage"},
+            else: nil
+          )
+        )
         |> assign(:upload_error, nil)
         |> assign(:processing, false)
         |> assign(:expanded_variable_key, nil)

@@ -16,6 +16,7 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
      socket
      |> Phoenix.Component.assign(:selected_sprite, name)
      |> Phoenix.Component.assign(:selected_target_type, type)
+     |> Phoenix.Component.assign(:deferred_target, deferred_target(socket.assigns.project, name, type))
      |> Phoenix.Component.assign(:show_sprite_code, false)
      |> Phoenix.Component.assign(:flow_detail, nil)
      |> Phoenix.Component.assign(:expanded_variable_key, nil)}
@@ -82,6 +83,7 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
      |> Phoenix.Component.assign(:upload_error, nil)
      |> Phoenix.Component.assign(:active_tab, :flow)
      |> Phoenix.Component.assign(:processing, false)
+     |> Phoenix.Component.assign(:deferred_target, nil)
      |> Phoenix.Component.assign(:show_sprite_code, false)
      |> Phoenix.Component.assign(:flow_detail, nil)
      |> Phoenix.Component.assign(:expanded_variable_key, nil)}
@@ -145,6 +147,15 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
 
   defp find_target(project, name, _type) do
     Enum.find(project.sprites, &(&1.name == name))
+  end
+
+  defp deferred_target(nil, _name, _type), do: nil
+
+  defp deferred_target(project, name, type) do
+    case find_target(project, name, type) do
+      %{deferred_analysis: true} -> %{name: name, type: type}
+      _ -> nil
+    end
   end
 
   defp run_deferred_enrich_with_timeout(target, name, type) do

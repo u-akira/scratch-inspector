@@ -4,7 +4,7 @@ mermaid.initialize({
   startOnLoad: false,
   theme: "default",
   flowchart: {
-    curve: "basis",
+    curve: "linear",
     useMaxWidth: false,
     htmlLabels: true,
   },
@@ -107,6 +107,92 @@ export const MermaidHook = {
     svgEl.style.height = `${this._baseSize.height * this._scale}px`
   },
 
+  parseNodeTranslate(nodeEl) {
+    const raw = nodeEl.getAttribute("transform") || ""
+    const m = raw.match(/translate\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/)
+    if (!m) return null
+    return { x: Number(m[1]), y: Number(m[2]) }
+  },
+
+  extractEdgeEndpointIds(pathEl) {
+    const classes = (pathEl.getAttribute("class") || "").split(/\s+/)
+    const src = classes.find((c) => c.startsWith("LS-"))
+    const dst = classes.find((c) => c.startsWith("LE-"))
+    if (!src || !dst) return null
+    return { src: src.slice(3), dst: dst.slice(3) }
+  },
+
+  // Mermaid/Dagre may choose top/bottom ports for fan-out edges.
+  // For LR flow readability, force source at right edge and target at left edge.
+  forceHorizontalAnchors(svgEl) {
+    const nodeBoxes = new Map()
+
+    svgEl.querySelectorAll("g.node[data-id]").forEach((nodeEl) => {
+      const id = nodeEl.getAttribute("data-id")
+      if (!id) return
+
+      const t = this.parseNodeTranslate(nodeEl)
+      if (!t) return
+
+      const rect = nodeEl.querySelector("rect.label-container")
+      if (!rect) return
+
+      const rx = Number(rect.getAttribute("x") || 0)
+      const ry = Number(rect.getAttribute("y") || 0)
+      const rw = Number(rect.getAttribute("width") || 0)
+      const rh = Number(rect.getAttribute("height") || 0)
+
+      nodeBoxes.set(id, {
+        left: t.x + rx,
+        right: t.x + rx + rw,
+        top: t.y + ry,
+        bottom: t.y + ry + rh,
+      })
+    })
+
+    const coordRe = /(-?\d*\.?\d+),(-?\d*\.?\d+)/g
+
+    const edgePaths = svgEl.querySelectorAll("g.edgePaths path.flowchart-link, g.edgePaths path")
+
+    edgePaths.forEach((pathEl) => {
+      const ids = this.extractEdgeEndpointIds(pathEl)
+      if (!ids) return
+
+      const src = nodeBoxes.get(ids.src)
+      const dst = nodeBoxes.get(ids.dst)
+      if (!src || !dst) return
+
+      const d = pathEl.getAttribute("d") || ""
+      const matches = [...d.matchAll(coordRe)]
+      if (matches.length < 2) return
+
+      const first = matches[0]
+      const last = matches[matches.length - 1]
+      const x1 = Number(first[1])
+      const y1raw = Number(first[2])
+      const x2 = Number(last[1])
+      const y2raw = Number(last[2])
+
+      const y1 = Math.max(src.top + 4, Math.min(y1raw, src.bottom - 4))
+      const y2 = Math.max(dst.top + 4, Math.min(y2raw, dst.bottom - 4))
+      const sx = src.right
+      const tx = dst.left
+      const midX = Number(((sx + tx) / 2).toFixed(3))
+
+      // Always rebuild path so start/end anchors are deterministic.
+      // Preserve near-straight look for same-row links.
+      const rebuilt =
+        Math.abs(y1 - y2) < 1
+          ? `M${sx},${y1}L${tx},${y2}`
+          : `M${sx},${y1}L${midX},${y1}L${midX},${y2}L${tx},${y2}`
+
+      pathEl.setAttribute("d", rebuilt)
+    })
+
+    svgEl.setAttribute("data-anchor-patched", "1")
+    svgEl.setAttribute("data-anchor-path-count", String(edgePaths.length))
+  },
+
   measureBaseSize(svgEl) {
     const viewBox = svgEl.viewBox?.baseVal
     if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
@@ -138,6 +224,8 @@ export const MermaidHook = {
 
       const svgEl = this.viewport.querySelector("svg")
       if (svgEl) {
+        this.forceHorizontalAnchors(svgEl)
+
         svgEl.style.maxWidth = "none"
         svgEl.style.width = "auto"
         svgEl.style.height = "auto"

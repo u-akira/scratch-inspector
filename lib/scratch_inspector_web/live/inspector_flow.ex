@@ -56,21 +56,6 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
            (custom_blocks |> Enum.flat_map(&broadcasts_sent_in_script(&1.code_blocks))))
         |> Enum.uniq()
 
-      broadcast_nodes =
-        broadcast_messages
-        |> Enum.with_index(1)
-        |> Enum.map(fn {msg, idx} ->
-          %{
-            id: "broadcast_#{idx}",
-            detail: flow_detail_payload(%{kind: "broadcast", id: msg}, target),
-            label: msg,
-            class: :broadcast,
-            message: msg
-          }
-        end)
-
-      broadcast_node_ids = Map.new(broadcast_nodes, fn node -> {node.message, node.id} end)
-
       {receiver_nodes, receiver_node_ids} =
         broadcast_messages
         |> Enum.flat_map(&find_broadcast_receivers(project, &1))
@@ -97,7 +82,7 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
               %{
                 id: node_id,
                 detail: flow_detail_payload(%{kind: "script", id: script.id}, receiver_target),
-                label: "#{display_name(receiver_target)}<br/>#{script.hat_label}",
+                label: receiver_label(receiver_target, script),
                 class: :receiver_script
               }
             end
@@ -114,7 +99,18 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
 
           broadcast_edges =
             broadcasts_sent_in_script(node.script.blocks)
-            |> Enum.map(fn msg -> {node.id, Map.get(broadcast_node_ids, msg)} end)
+            |> Enum.flat_map(fn msg ->
+              find_broadcast_receivers(project, msg)
+              |> Enum.map(fn {receiver_target, script} ->
+                to_id =
+                  Map.get(
+                    receiver_node_ids,
+                    {receiver_target.name, receiver_target.is_stage, script.id}
+                  )
+
+                {node.id, to_id}
+              end)
+            end)
 
           called_edges ++ broadcast_edges
         end)
@@ -127,32 +123,27 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
 
           broadcast_edges =
             broadcasts_sent_in_script(node.block_def.code_blocks)
-            |> Enum.map(fn msg -> {node.id, Map.get(broadcast_node_ids, msg)} end)
+            |> Enum.flat_map(fn msg ->
+              find_broadcast_receivers(project, msg)
+              |> Enum.map(fn {receiver_target, script} ->
+                to_id =
+                  Map.get(
+                    receiver_node_ids,
+                    {receiver_target.name, receiver_target.is_stage, script.id}
+                  )
+
+                {node.id, to_id}
+              end)
+            end)
 
           call_edges ++ broadcast_edges
         end)
 
-      receiver_edges =
-        Enum.flat_map(broadcast_messages, fn msg ->
-          from_id = Map.get(broadcast_node_ids, msg)
-
-          find_broadcast_receivers(project, msg)
-          |> Enum.map(fn {receiver_target, script} ->
-            to_id =
-              Map.get(
-                receiver_node_ids,
-                {receiver_target.name, receiver_target.is_stage, script.id}
-              )
-
-            {from_id, to_id}
-          end)
-        end)
-
       nodes =
-        script_nodes ++ block_nodes ++ broadcast_nodes ++ Enum.reject(receiver_nodes, &is_nil/1)
+        script_nodes ++ block_nodes ++ Enum.reject(receiver_nodes, &is_nil/1)
 
       edges =
-        (script_edges ++ block_edges ++ receiver_edges)
+        (script_edges ++ block_edges)
         |> Enum.reject(fn {from_id, to_id} -> is_nil(from_id) or is_nil(to_id) end)
         |> Enum.uniq()
 
@@ -203,10 +194,9 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
 
   defp render_flow_mermaid(nodes, edges, flow_detail) do
     header = [
-      "flowchart TD",
+      "flowchart LR",
       "classDef scriptNode fill:#FFAB19,stroke:#CC8813,color:#ffffff,stroke-width:2px;",
       "classDef blockNode fill:#FF6680,stroke:#D64C68,color:#ffffff,stroke-width:2px;",
-      "classDef broadcastNode fill:#FFAB19,stroke:#CC8813,color:#ffffff,stroke-width:2px,stroke-dasharray: 6 3;",
       "classDef receiverNode fill:#ffffff,stroke:#4C97FF,color:#1f2937,stroke-width:2px;",
       "classDef selectedNode stroke:#2563EB,stroke-width:4px;"
     ]
@@ -284,9 +274,33 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
 
   defp flow_node_label(script), do: script.hat_label
 
+  defp receiver_label(target, %{hat_opcode: "event_whenbroadcastreceived"}) do
+    with false <- Map.get(target, :is_stage, false),
+         {:ok, img_tag} <- receiver_costume_img_tag(target) do
+      "#{img_tag} #{display_name(target)}"
+    else
+      _ -> display_name(target)
+    end
+  end
+
+  defp receiver_label(target, script) do
+    "#{display_name(target)}<br/>#{script.hat_label}"
+  end
+
+  defp receiver_costume_img_tag(target) do
+    case List.first(Map.get(target, :costumes, [])) do
+      %{base64: b64, mime: mime}
+      when is_binary(b64) and b64 != "" and is_binary(mime) and mime != "" and byte_size(b64) <= 20_000 ->
+        {:ok,
+         ~s(<img src="data:#{mime};base64,#{b64}" width="1.1em" height="1.1em" style="display:inline-block;width:1.1em;height:1.1em;max-width:none;vertical-align:-0.14em;margin-right:0.30em;border-radius:2px;" />)}
+
+      _ ->
+        :error
+    end
+  end
+
   defp mermaid_class(:script), do: "scriptNode"
   defp mermaid_class(:block_def), do: "blockNode"
-  defp mermaid_class(:broadcast), do: "broadcastNode"
   defp mermaid_class(:receiver_script), do: "receiverNode"
 
   defp event_hat?(opcode), do: opcode in @event_hat_opcodes

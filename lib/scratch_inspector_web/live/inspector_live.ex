@@ -23,6 +23,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
       |> assign(:show_sprite_code, false)
       |> assign(:flow_detail, nil)
       |> assign(:expanded_variable_key, nil)
+      |> assign(:deferred_target, nil)
       |> allow_upload(:scratch_file,
         accept: :any,
         max_entries: 1,
@@ -64,7 +65,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
     {:noreply,
      socket
      |> assign(:processing, false)
-     |> assign(:upload_error, "後解析に失敗しました: #{reason}")}
+     |> assign(:deferred_target, nil)
+     |> assign(:upload_error, "遅延解析に失敗しました: #{reason}")}
   end
 
   @impl true
@@ -89,7 +91,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
     {:noreply,
      socket
      |> assign(:project, updated_project)
-     |> assign(:processing, false)}
+     |> assign(:processing, false)
+     |> assign(:deferred_target, nil)}
   end
 
   # ---- helpers ----
@@ -283,7 +286,12 @@ defmodule ScratchInspectorWeb.InspectorLive do
               ) %>
             <%= case @active_tab do %>
               <% :flow -> %>
-                <.flow_graph_panel project={@project} target={target} flow_detail={@flow_detail} />
+                <.flow_graph_panel
+                  project={@project}
+                  target={target}
+                  flow_detail={@flow_detail}
+                  deferred_target={@deferred_target}
+                />
               <% :variables -> %>
                 <VariablesComponents.variables_panel
                   project={@project}
@@ -310,15 +318,18 @@ defmodule ScratchInspectorWeb.InspectorLive do
   attr :project, :map, required: true
   attr :target, :map, default: nil
   attr :flow_detail, :map, default: nil
+  attr :deferred_target, :map, default: nil
 
   defp flow_graph_panel(assigns) do
     detail = FlowDetailViewModel.build(assigns.project, assigns.target, assigns.flow_detail)
+    target_loading? = target_deferred_loading?(assigns.target, assigns.deferred_target)
 
     assigns =
       assigns
       |> assign(:detail_script, detail.detail_script)
       |> assign(:detail_title, detail.detail_title)
       |> assign(:detail_receivers, detail.detail_receivers)
+      |> assign(:target_loading?, target_loading?)
       |> assign(
         :graph_chart,
         InspectorFlow.build_flow_mermaid(assigns.project, assigns.target, assigns.flow_detail)
@@ -331,11 +342,25 @@ defmodule ScratchInspectorWeb.InspectorLive do
     ~H"""
     <div>
       <%= if @target do %>
+        <%= if @target_loading? do %>
+          <div class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-center gap-2">
+            <span class="inline-block h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span>この対象のフローを解析中です。完了すると自動で更新されます。</span>
+          </div>
+        <% end %>
+
         <%= if is_nil(@graph_chart) do %>
+          <%= if @target_loading? do %>
+            <AssetsComponents.empty_state
+              icon=""
+              message="Flow is still being analyzed for this target."
+            />
+          <% else %>
           <AssetsComponents.empty_state
             icon=""
             message="このスプライトにはスクリプトがありません"
           />
+          <% end %>
         <% else %>
           <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <div class="mb-3 flex items-center justify-between gap-3">
@@ -459,4 +484,15 @@ defmodule ScratchInspectorWeb.InspectorLive do
     do: not is_nil(header) or Enum.any?(blocks || [])
 
   defp detail_blocks_present?(_), do: false
+
+  defp target_deferred_loading?(nil, _deferred_target), do: false
+  defp target_deferred_loading?(_target, nil), do: false
+
+  defp target_deferred_loading?(target, deferred_target) do
+    Map.get(target, :name) == Map.get(deferred_target, :name) and
+      target_type(target) == Map.get(deferred_target, :type)
+  end
+
+  defp target_type(%{is_stage: true}), do: "stage"
+  defp target_type(_), do: "sprite"
 end
