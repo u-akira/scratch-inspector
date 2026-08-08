@@ -15,9 +15,9 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Assets do
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
           <%= for {costume, idx} <- Enum.with_index(@target.costumes) do %>
             <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div class="aspect-square bg-gray-50 flex items-center justify-center p-2 border-b border-gray-100">
+              <div class="costume-preview aspect-square bg-gray-50 flex items-center justify-center p-2 border-b border-gray-100">
                 <%= if costume.base64 do %>
-                  <img src={"data:#{costume.mime};base64,#{costume.base64}"} alt={costume.name} class="max-w-full max-h-full object-contain" />
+                  <img src={"data:#{costume.mime};base64,#{costume.base64}"} alt={costume.name} class="costume-preview__image" />
                 <% else %>
                   <span class="text-3xl text-gray-300">🖼️</span>
                 <% end %>
@@ -48,7 +48,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Assets do
       </h2>
       <%= if @target && Enum.any?(@target.sounds) do %>
         <div class="space-y-3">
-          <%= for sound <- @target.sounds do %>
+          <%= for {sound, idx} <- Enum.with_index(@target.sounds) do %>
             <div class="bg-white rounded-xl border border-gray-200 p-4">
               <div class="flex items-center gap-3">
                 <span class="text-2xl">🔊</span>
@@ -66,9 +66,17 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Assets do
                 </div>
               </div>
               <%= if sound.base64 do %>
-                <div class="mt-3">
-                  <audio controls class="w-full h-8" preload="none">
-                    <source src={"data:#{sound.mime};base64,#{sound.base64}"} type={sound.mime} />
+                <div
+                  id={"sound-player-#{sound_dom_id(sound, idx)}"}
+                  class="mt-3"
+                  phx-update="replace"
+                >
+                  <audio
+                    controls
+                    class="w-full h-8"
+                    preload="metadata"
+                    src={"data:#{sound.mime};base64,#{sound.base64}"}
+                  >
                   </audio>
                 </div>
               <% else %>
@@ -113,4 +121,17 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Assets do
 
   def display_name(%{is_stage: true}), do: "背景"
   def display_name(%{name: name}), do: name
+
+  defp sound_dom_id(sound, idx) do
+    source =
+      Map.get(sound, :asset_file) ||
+        "#{Map.get(sound, :name, "sound")}-#{Map.get(sound, :data_format, "audio")}-#{idx}"
+
+    digest =
+      :crypto.hash(:sha256, source)
+      |> Base.url_encode64(padding: false)
+      |> binary_part(0, 12)
+
+    "#{idx}-#{digest}"
+  end
 end

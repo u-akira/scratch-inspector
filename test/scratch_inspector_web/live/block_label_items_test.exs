@@ -98,4 +98,17 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItemsTest do
              %{kind: :input, name: "OPERAND2", slot: :round, value: %{kind: :literal, value: "1"}}
            ]
   end
+
+  test "resolves toio direction menu field aliases" do
+    assert BlockLabelItems.parse("[DIRECTION]に速さ[SPEED]で[DURATION]秒動かす", [
+             %{name: "moveDirections", value: "前"}
+           ], []) == [
+             %{kind: :field, name: "DIRECTION", value: "前"},
+             %{kind: :label, value: "に速さ"},
+             %{kind: :label, value: "[SPEED]"},
+             %{kind: :label, value: "で"},
+             %{kind: :label, value: "[DURATION]"},
+             %{kind: :label, value: "秒動かす"}
+           ]
+  end
 end

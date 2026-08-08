@@ -81,14 +81,17 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItems do
   defp resolve_by_name(_, _), do: nil
 
   # micro:bit menu blocks sometimes expose lowercase field names (e.g. "buttons")
-  # while labels use uppercase placeholders ("[BTN]").
+  # while labels use uppercase placeholders ("[BTN]"). Extension menus also
+  # reuse generic placeholders such as "[DIRECTION]" with extension-specific
+  # field names.
   defp resolve_with_alias(collection, name) do
-    resolve_by_name(collection, name) || resolve_by_name(collection, placeholder_alias(name))
+    [name | placeholder_aliases(name)]
+    |> Enum.find_value(&resolve_by_name(collection, &1))
   end
 
-  defp placeholder_alias("BTN"), do: "buttons"
-  defp placeholder_alias("DIRECTION"), do: "tiltDirectionAny"
-  defp placeholder_alias(name), do: name
+  defp placeholder_aliases("BTN"), do: ["buttons"]
+  defp placeholder_aliases("DIRECTION"), do: ["tiltDirectionAny", "moveDirections", "rotateDirections"]
+  defp placeholder_aliases(_name), do: []
 
   defp entry_name(entry) when is_map(entry) do
     Map.get(entry, :name) || Map.get(entry, "name")

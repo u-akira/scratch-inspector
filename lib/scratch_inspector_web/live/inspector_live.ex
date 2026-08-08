@@ -363,19 +363,15 @@ defmodule ScratchInspectorWeb.InspectorLive do
           <% end %>
         <% else %>
           <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-            <div class="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h2 class="text-sm font-semibold text-gray-800">Flow Graph</h2>
-                
-                <p class="text-xs text-gray-500">Click a node to inspect inline detail.</p>
-              </div>
-               <span class="text-xs text-gray-400">{AssetsComponents.display_name(@target)}</span>
+            <div class="mb-3 flex items-center justify-end gap-3">
+              <span class="text-xs text-gray-400">{AssetsComponents.display_name(@target)}</span>
             </div>
             
             <div
               id={"flow-chart-#{flow_dom_id(@target)}"}
               phx-hook="MermaidChart"
               data-chart={@graph_chart}
+              data-selected-detail={flow_detail_json(@flow_detail)}
               class="rounded-lg bg-slate-50"
             >
               <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2">
@@ -412,7 +408,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                 <%= if @flow_detail do %>
                   <div
                     data-role="flow-inline-detail"
-                    class="absolute z-20 w-[min(560px,calc(100%-1rem))] border border-gray-200 rounded-xl overflow-hidden bg-white shadow-lg"
+                    class="scratch-flow-inline-detail absolute z-20 flex w-[min(560px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
                     style="display:none;"
                   >
                     <div class="absolute right-3 top-3 z-10">
@@ -422,12 +418,12 @@ defmodule ScratchInspectorWeb.InspectorLive do
                         phx-value-id={@flow_detail.id}
                         phx-value-sprite={@flow_detail.sprite}
                         phx-value-type={@flow_detail.type}
-                        class="text-gray-400 hover:text-gray-600 text-lg leading-none"
+                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/85 text-lg leading-none text-gray-400 shadow-sm ring-1 ring-gray-200 transition hover:bg-white hover:text-gray-600"
                       >
                         ✕
                       </button>
                     </div>
-                    <div class="p-4 bg-gray-50 max-h-[320px] overflow-auto">
+                    <div class="scratch-flow-detail-body">
                       <%= if @detail_script do %>
                         <%= if detail_blocks_present?(@detail_script) do %>
                           <ScratchBlocksComponents.scratch_script_detail detail={@detail_script} />
@@ -532,6 +528,9 @@ defmodule ScratchInspectorWeb.InspectorLive do
     |> String.downcase()
     |> String.replace(~r/[^a-z0-9]+/u, "-")
   end
+
+  defp flow_detail_json(nil), do: nil
+  defp flow_detail_json(flow_detail), do: Jason.encode!(flow_detail)
 
   defp detail_blocks_present?(%{header: header, blocks: blocks}),
     do: not is_nil(header) or Enum.any?(blocks || [])

@@ -1,6 +1,7 @@
 defmodule ScratchInspector.Parser do
   require Logger
   @thumbnail_inline_limit_bytes 300_000
+  @sound_inline_limit_bytes 1_500_000
   @heavy_sprite_block_threshold 3_000
   @moduledoc """
   Scratch プロジェクトファイルのパーサー。
@@ -11,7 +12,6 @@ defmodule ScratchInspector.Parser do
   # ---- Block labels (Japanese translations) ----
 
   defp opcode_label("looks_seteffectto"), do: "[EFFECT] の効果を [VALUE] にする"
-  defp opcode_label("operator_random"), do: "[FROM] から [TO] までの乱数"
   defp opcode_label("data_setvariableto"), do: "[VARIABLE] を [VALUE] にする"
   defp opcode_label("data_changevariableby"), do: "[VARIABLE] を [VALUE] ずつ変える"
   defp opcode_label("data_showvariable"), do: "変数 [VARIABLE] を表示する"
@@ -69,6 +69,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("looks_switchbackdroptoandwait"), do: "背景を [BACKDROP] にする"
   defp opcode_label("looks_nextbackdrop"), do: "次の背景にする"
   defp opcode_label("looks_backdropnumbername"), do: "背景の [NUMBER_NAME]"
+  defp opcode_label("looks_backdrops"), do: "[BACKDROP]"
   defp opcode_label("sound_playuntildone"), do: "終わるまで [SOUND_MENU] の音を鳴らす"
   defp opcode_label("sound_play"), do: "[SOUND_MENU] の音を鳴らす"
   defp opcode_label("sound_sounds_menu"), do: "[SOUND_MENU]"
@@ -106,6 +107,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("sensing_timer"), do: "タイマー"
   defp opcode_label("sensing_resettimer"), do: "タイマーをリセット"
   defp opcode_label("sensing_of"), do: "[OBJECT] の [PROPERTY]"
+  defp opcode_label("sensing_of_object_menu"), do: "[OBJECT]"
   defp opcode_label("sensing_current"), do: "現在の [CURRENTMENU]"
   defp opcode_label("sensing_dayssince2000"), do: "2000年からの日数"
   defp opcode_label("sensing_username"), do: "ユーザー名"
@@ -160,6 +162,26 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("microbit_isTilted"), do: "[DIRECTION]に傾いた"
   defp opcode_label("microbit_getTiltAngle"), do: "[DIRECTION]方向の傾き"
   defp opcode_label("microbit_whenPinConnected"), do: "ピン[PIN]がつながったとき"
+  # toio do blocks
+  defp opcode_label("toio_moveFor"), do: "[DIRECTION]に速さ[SPEED]で[DURATION]秒動かす"
+  defp opcode_label("toio2_moveFor"), do: opcode_label("toio_moveFor")
+  defp opcode_label("toio_menu_moveDirections"), do: "[DIRECTION]"
+  defp opcode_label("toio2_menu_moveDirections"), do: opcode_label("toio_menu_moveDirections")
+  defp opcode_label("toio_rotateFor"), do: "[DIRECTION]に速さ[SPEED]で[DURATION]秒回す"
+  defp opcode_label("toio2_rotateFor"), do: opcode_label("toio_rotateFor")
+  defp opcode_label("toio_menu_rotateDirections"), do: "[DIRECTION]"
+  defp opcode_label("toio2_menu_rotateDirections"), do: opcode_label("toio_menu_rotateDirections")
+
+  defp opcode_label("toio_moveWheelsFor"),
+    do: "左タイヤを速さ[LEFT_SPEED]、右タイヤを速さ[RIGHT_SPEED]で[DURATION]秒動かす"
+
+  defp opcode_label("toio2_moveWheelsFor"), do: opcode_label("toio_moveWheelsFor")
+  defp opcode_label("toio_moveTo"), do: "x座標[X]、y座標[Y]へ動かす"
+  defp opcode_label("toio2_moveTo"), do: opcode_label("toio_moveTo")
+  defp opcode_label("toio_pointInDirection"), do: "[DIRECTION]度に向ける"
+  defp opcode_label("toio2_pointInDirection"), do: opcode_label("toio_pointInDirection")
+  defp opcode_label("toio_stopWheels"), do: "タイヤを止める"
+  defp opcode_label("toio2_stopWheels"), do: opcode_label("toio_stopWheels")
   # Custom blocks
   defp opcode_label("procedures_definition"), do: "定義"
   defp opcode_label("procedures_call"), do: "custom block"
@@ -181,7 +203,10 @@ defmodule ScratchInspector.Parser do
       {:ok, project}
     else
       {:error, reason} = err ->
-        Logger.error("[parser] parse error elapsed_ms=#{System.monotonic_time(:millisecond) - t0} reason=#{inspect(reason)}")
+        Logger.error(
+          "[parser] parse error elapsed_ms=#{System.monotonic_time(:millisecond) - t0} reason=#{inspect(reason)}"
+        )
+
         err
     end
   end
@@ -194,7 +219,8 @@ defmodule ScratchInspector.Parser do
     {:error, "未対応のファイル形式: #{ext}"}
   end
 
-  def enrich_project_costume_images_from_archive(project, path, ext) when ext in [".sb2", ".sb3"] do
+  def enrich_project_costume_images_from_archive(project, path, ext)
+      when ext in [".sb2", ".sb3"] do
     with {:ok, files} <- extract_zip(path) do
       {:ok, enrich_project_costume_images(project, files)}
     end
@@ -234,7 +260,8 @@ defmodule ScratchInspector.Parser do
   defp extract_top_scripts_light(blocks) do
     blocks
     |> Enum.filter(fn {_id, block} ->
-      is_map(block) and is_nil(Map.get(block, "parent")) and Map.get(block, "topLevel", false) == true
+      is_map(block) and is_nil(Map.get(block, "parent")) and
+        Map.get(block, "topLevel", false) == true
     end)
     |> Enum.reject(fn {_id, block} ->
       Map.get(block, "opcode") in ["procedures_definition", "procedures_prototype"]
@@ -264,11 +291,17 @@ defmodule ScratchInspector.Parser do
 
     case :zip.unzip(String.to_charlist(path), [:memory]) do
       {:ok, files} ->
-        Logger.info("[parser] unzip ok entries=#{length(files)} elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+        Logger.info(
+          "[parser] unzip ok entries=#{length(files)} elapsed_ms=#{System.monotonic_time(:millisecond) - t0}"
+        )
+
         {:ok, files}
 
       {:error, reason} ->
-        Logger.error("[parser] unzip error elapsed_ms=#{System.monotonic_time(:millisecond) - t0} reason=#{inspect(reason)}")
+        Logger.error(
+          "[parser] unzip error elapsed_ms=#{System.monotonic_time(:millisecond) - t0} reason=#{inspect(reason)}"
+        )
+
         {:error, "ZIP の展開に失敗しました: #{inspect(reason)}"}
     end
   end
@@ -278,11 +311,17 @@ defmodule ScratchInspector.Parser do
 
     case Enum.find(files, fn {name, _} -> name == ~c"project.json" end) do
       {_, content} ->
-        Logger.info("[parser] project.json found bytes=#{byte_size(content)} elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+        Logger.info(
+          "[parser] project.json found bytes=#{byte_size(content)} elapsed_ms=#{System.monotonic_time(:millisecond) - t0}"
+        )
+
         {:ok, content}
 
       nil ->
-        Logger.error("[parser] project.json missing elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+        Logger.error(
+          "[parser] project.json missing elapsed_ms=#{System.monotonic_time(:millisecond) - t0}"
+        )
+
         {:error, "project.json が見つかりません"}
     end
   end
@@ -304,7 +343,10 @@ defmodule ScratchInspector.Parser do
     t_vars = System.monotonic_time(:millisecond)
     global_vars = extract_global_variables(targets)
     local_vars = extract_local_variables(targets)
-    Logger.info("[parser] build_project vars elapsed_ms=#{System.monotonic_time(:millisecond) - t_vars} global=#{length(global_vars)} local=#{length(local_vars)}")
+
+    Logger.info(
+      "[parser] build_project vars elapsed_ms=#{System.monotonic_time(:millisecond) - t_vars} global=#{length(global_vars)} local=#{length(local_vars)}"
+    )
 
     stage_target = Enum.find(targets, fn t -> Map.get(t, "isStage", false) end)
     sprite_targets = Enum.reject(targets, fn t -> Map.get(t, "isStage", false) end)
@@ -314,13 +356,20 @@ defmodule ScratchInspector.Parser do
         t_stage = System.monotonic_time(:millisecond)
         Logger.info("[parser] build_project stage start")
         result = build_sprite(Map.put(stage_target, "name", "Stage"), zip_files, true)
-        Logger.info("[parser] build_project stage done elapsed_ms=#{System.monotonic_time(:millisecond) - t_stage}")
+
+        Logger.info(
+          "[parser] build_project stage done elapsed_ms=#{System.monotonic_time(:millisecond) - t_stage}"
+        )
+
         result
       end
 
     t_sprites = System.monotonic_time(:millisecond)
     sprites = Enum.map(sprite_targets, &build_sprite(&1, zip_files, false))
-    Logger.info("[parser] build_project sprites elapsed_ms=#{System.monotonic_time(:millisecond) - t_sprites} count=#{length(sprites)}")
+
+    Logger.info(
+      "[parser] build_project sprites elapsed_ms=#{System.monotonic_time(:millisecond) - t_sprites} count=#{length(sprites)}"
+    )
 
     project = %{
       name: "",
@@ -329,7 +378,10 @@ defmodule ScratchInspector.Parser do
       variables: global_vars ++ local_vars
     }
 
-    Logger.info("[parser] build_project ok elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+    Logger.info(
+      "[parser] build_project ok elapsed_ms=#{System.monotonic_time(:millisecond) - t0}"
+    )
+
     project
   end
 
@@ -369,14 +421,25 @@ defmodule ScratchInspector.Parser do
     t0 = System.monotonic_time(:millisecond)
     name = Map.get(target, "name", "Unknown")
     blocks = Map.get(target, "blocks", %{})
-    Logger.info("[parser] build_sprite start name=#{name} stage=#{is_stage} blocks=#{map_size(blocks)}")
+
+    Logger.info(
+      "[parser] build_sprite start name=#{name} stage=#{is_stage} blocks=#{map_size(blocks)}"
+    )
 
     t = System.monotonic_time(:millisecond)
     scripts = extract_script_labels(blocks)
-    Logger.info("[parser] build_sprite scripts done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
+
+    Logger.info(
+      "[parser] build_sprite scripts done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}"
+    )
+
     t = System.monotonic_time(:millisecond)
     events = extract_events(blocks)
-    Logger.info("[parser] build_sprite events done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
+
+    Logger.info(
+      "[parser] build_sprite events done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}"
+    )
+
     {custom_blocks, top_scripts, deferred_analysis, raw_blocks} =
       if map_size(blocks) > @heavy_sprite_block_threshold do
         Logger.warning(
@@ -389,18 +452,34 @@ defmodule ScratchInspector.Parser do
       else
         t = System.monotonic_time(:millisecond)
         custom_blocks = extract_custom_blocks(blocks)
-        Logger.info("[parser] build_sprite custom_blocks done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
+
+        Logger.info(
+          "[parser] build_sprite custom_blocks done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}"
+        )
+
         t = System.monotonic_time(:millisecond)
         top_scripts = extract_top_scripts(blocks)
-        Logger.info("[parser] build_sprite top_scripts done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}")
+
+        Logger.info(
+          "[parser] build_sprite top_scripts done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}"
+        )
+
         {custom_blocks, top_scripts, false, nil}
       end
+
     t = System.monotonic_time(:millisecond)
     costumes = extract_costumes(target, zip_files)
-    Logger.info("[parser] build_sprite costumes done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t} count=#{length(costumes)}")
+
+    Logger.info(
+      "[parser] build_sprite costumes done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t} count=#{length(costumes)}"
+    )
+
     t = System.monotonic_time(:millisecond)
     sounds = extract_sounds(target, zip_files)
-    Logger.info("[parser] build_sprite sounds done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t} count=#{length(sounds)}")
+
+    Logger.info(
+      "[parser] build_sprite sounds done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t} count=#{length(sounds)}"
+    )
 
     result = %{
       name: name,
@@ -415,13 +494,17 @@ defmodule ScratchInspector.Parser do
       sounds: sounds
     }
 
-    Logger.info("[parser] build_sprite ok name=#{name} total_elapsed_ms=#{System.monotonic_time(:millisecond) - t0}")
+    Logger.info(
+      "[parser] build_sprite ok name=#{name} total_elapsed_ms=#{System.monotonic_time(:millisecond) - t0}"
+    )
+
     result
   end
 
   defp build_render_stack(start_id, blocks), do: build_detail_stack(start_id, blocks)
 
-  defp build_detail_stack(start_id, blocks), do: build_detail_stack(start_id, blocks, MapSet.new())
+  defp build_detail_stack(start_id, blocks),
+    do: build_detail_stack(start_id, blocks, MapSet.new())
 
   defp build_detail_stack(nil, _blocks, _visited), do: []
 
@@ -502,7 +585,8 @@ defmodule ScratchInspector.Parser do
 
   defp normalize_detail_input_value(_, _blocks, _parent_opcode, _input_name), do: nil
 
-  defp normalize_detail_input_atom([type, value | _], _blocks, _parent_opcode, _input_name) when is_binary(value) or is_number(value) do
+  defp normalize_detail_input_atom([type, value | _], _blocks, _parent_opcode, _input_name)
+       when is_binary(value) or is_number(value) do
     %{kind: :literal, input_type: type, value: to_string(value)}
   end
 
@@ -540,10 +624,20 @@ defmodule ScratchInspector.Parser do
   defp render_block_label(block) do
     opcode = Map.get(block, "opcode", "")
 
-    if opcode == "procedures_call" do
-      block |> Map.get("mutation", %{}) |> Map.get("proccode", "custom block")
-    else
-      opcode_label(opcode)
+    case opcode do
+      "procedures_call" ->
+        block
+        |> Map.get("mutation", %{})
+        |> custom_procedure_display_label()
+
+      "argument_reporter_boolean" ->
+        argument_reporter_label(block)
+
+      "argument_reporter_string_number" ->
+        argument_reporter_label(block)
+
+      _ ->
+        opcode_label(opcode)
     end
   end
 
@@ -558,7 +652,9 @@ defmodule ScratchInspector.Parser do
 
     input_parts =
       inputs
-      |> Enum.reject(fn {key, _} -> String.starts_with?(key, "SUBSTACK") || key == "custom_block" end)
+      |> Enum.reject(fn {key, _} ->
+        String.starts_with?(key, "SUBSTACK") || key == "custom_block"
+      end)
       |> Enum.sort_by(fn {key, _} -> key end)
       |> Enum.map(fn {key, value} ->
         %{
@@ -580,9 +676,45 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("STOP_OPTION", "all"), do: "すべてを止める"
   defp normalize_field_value("STOP_OPTION", "this script"), do: "このスクリプトを止める"
   defp normalize_field_value("STOP_OPTION", "other scripts in sprite"), do: "スプライトの他のスクリプトを止める"
+  defp normalize_field_value("EFFECT", "GHOST"), do: "幽霊"
+  defp normalize_field_value("EFFECT", "ghost"), do: "幽霊"
+  defp normalize_field_value("EFFECT", "COLOR"), do: "色"
+  defp normalize_field_value("EFFECT", "color"), do: "色"
+  defp normalize_field_value("EFFECT", "FISHEYE"), do: "魚眼レンズ"
+  defp normalize_field_value("EFFECT", "fisheye"), do: "魚眼レンズ"
+  defp normalize_field_value("EFFECT", "WHIRL"), do: "渦巻き"
+  defp normalize_field_value("EFFECT", "whirl"), do: "渦巻き"
+  defp normalize_field_value("EFFECT", "PIXELATE"), do: "ピクセル化"
+  defp normalize_field_value("EFFECT", "pixelate"), do: "ピクセル化"
+  defp normalize_field_value("EFFECT", "MOSAIC"), do: "モザイク"
+  defp normalize_field_value("EFFECT", "mosaic"), do: "モザイク"
+  defp normalize_field_value("EFFECT", "BRIGHTNESS"), do: "明るさ"
+  defp normalize_field_value("EFFECT", "brightness"), do: "明るさ"
+  defp normalize_field_value("NUMBER_NAME", "number"), do: "番号"
+  defp normalize_field_value("NUMBER_NAME", "name"), do: "名前"
+  defp normalize_field_value("DRAG_MODE", "draggable"), do: "ドラッグできる"
+  defp normalize_field_value("DRAG_MODE", "not draggable"), do: "ドラッグできない"
+  defp normalize_field_value("PROPERTY", "x position"), do: "x座標"
+  defp normalize_field_value("PROPERTY", "y position"), do: "y座標"
+  defp normalize_field_value("PROPERTY", "direction"), do: "向き"
+  defp normalize_field_value("PROPERTY", "costume #"), do: "コスチューム番号"
+  defp normalize_field_value("PROPERTY", "costume name"), do: "コスチューム名"
+  defp normalize_field_value("PROPERTY", "size"), do: "大きさ"
+  defp normalize_field_value("PROPERTY", "volume"), do: "音量"
+  defp normalize_field_value("PROPERTY", "backdrop #"), do: "背景番号"
+  defp normalize_field_value("PROPERTY", "backdrop name"), do: "背景の名前"
   defp normalize_field_value("BTN", "any"), do: "どれかの"
   defp normalize_field_value("buttons", value), do: normalize_field_value("BTN", value)
-  defp normalize_field_value("tiltDirectionAny", value), do: normalize_field_value("DIRECTION", value)
+
+  defp normalize_field_value("tiltDirectionAny", value),
+    do: normalize_field_value("DIRECTION", value)
+
+  defp normalize_field_value("moveDirections", value),
+    do: normalize_field_value("DIRECTION", value)
+
+  defp normalize_field_value("rotateDirections", value),
+    do: normalize_field_value("DIRECTION", value)
+
   defp normalize_field_value("GESTURE", "moved"), do: "動いた"
   defp normalize_field_value("GESTURE", "shaken"), do: "振られた"
   defp normalize_field_value("GESTURE", "jumped"), do: "ジャンプした"
@@ -590,6 +722,8 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("DIRECTION", "back"), do: "後ろ"
   defp normalize_field_value("DIRECTION", "left"), do: "左"
   defp normalize_field_value("DIRECTION", "right"), do: "右"
+  defp normalize_field_value("DIRECTION", "forward"), do: "前"
+  defp normalize_field_value("DIRECTION", "backward"), do: "後ろ"
   defp normalize_field_value("DIRECTION", "any"), do: "どれかの向き"
   defp normalize_field_value("TOUCHINGOBJECTMENU", "_mouse_"), do: "マウスのポインター"
   defp normalize_field_value("TOUCHINGOBJECTMENU", "_edge_"), do: "端"
@@ -607,8 +741,13 @@ defmodule ScratchInspector.Parser do
 
   defp render_input_value(_, _blocks, _parent_opcode, _input_name), do: nil
 
-  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name) when is_binary(value), do: value
-  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name) when is_number(value), do: to_string(value)
+  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name)
+       when is_binary(value),
+       do: value
+
+  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name)
+       when is_number(value),
+       do: to_string(value)
 
   defp render_input_atom(id, blocks, parent_opcode, input_name) when is_binary(id) do
     case Map.get(blocks, id) do
@@ -629,7 +768,8 @@ defmodule ScratchInspector.Parser do
   defp render_input_atom(_, _blocks, _parent_opcode, _input_name), do: nil
 
   defp nested_logical_input?(parent_opcode, _input_name, child_block) when is_map(child_block) do
-    logical_boolean_opcode?(parent_opcode) and logical_boolean_opcode?(Map.get(child_block, :opcode))
+    logical_boolean_opcode?(parent_opcode) and
+      logical_boolean_opcode?(Map.get(child_block, :opcode))
   end
 
   defp nested_logical_input?(_, _, _), do: false
@@ -650,7 +790,10 @@ defmodule ScratchInspector.Parser do
   end
 
   defp input_slot_shape(_key, [_, second], blocks), do: slot_shape_from_input(second, blocks)
-  defp input_slot_shape(_key, [_, second, _fallback], blocks), do: slot_shape_from_input(second, blocks)
+
+  defp input_slot_shape(_key, [_, second, _fallback], blocks),
+    do: slot_shape_from_input(second, blocks)
+
   defp input_slot_shape(_key, _value, _blocks), do: :round
 
   defp slot_shape_from_input(id, blocks) when is_binary(id) do
@@ -677,14 +820,29 @@ defmodule ScratchInspector.Parser do
 
   defp block_shape(opcode) do
     cond do
-      opcode in ["event_whenflagclicked", "event_whenbroadcastreceived", "event_whenkeypressed",
-                 "event_whenthisspriteclicked", "event_whenstageclicked", "event_whengreaterthan",
-                 "event_whenbackdropswitchesto", "control_start_as_clone",
-                 "microbit_whenButtonPressed", "microbit_whenGesture",
-                 "microbit_whenTilted", "microbit_whenPinConnected"] ->
+      opcode in [
+        "event_whenflagclicked",
+        "event_whenbroadcastreceived",
+        "event_whenkeypressed",
+        "event_whenthisspriteclicked",
+        "event_whenstageclicked",
+        "event_whengreaterthan",
+        "event_whenbackdropswitchesto",
+        "control_start_as_clone",
+        "microbit_whenButtonPressed",
+        "microbit_whenGesture",
+        "microbit_whenTilted",
+        "microbit_whenPinConnected"
+      ] ->
         :hat
 
-      opcode in ["control_forever", "control_repeat", "control_repeat_until", "control_if", "control_if_else"] ->
+      opcode in [
+        "control_forever",
+        "control_repeat",
+        "control_repeat_until",
+        "control_if",
+        "control_if_else"
+      ] ->
         :c_block
 
       opcode == "control_stop" ->
@@ -748,6 +906,8 @@ defmodule ScratchInspector.Parser do
       String.starts_with?(opcode, "procedures_") -> :custom
       String.starts_with?(opcode, "pen_") -> :pen
       String.starts_with?(opcode, "microbit_") -> :extension
+      String.starts_with?(opcode, "toio2_") -> :toio_do
+      String.starts_with?(opcode, "toio_") -> :toio
       true -> :default
     end
   end
@@ -768,11 +928,71 @@ defmodule ScratchInspector.Parser do
       fields: normalize_detail_fields(fields),
       inputs: normalize_detail_inputs(inputs, blocks, "procedures_definition"),
       children: normalize_detail_children(inputs, blocks),
-      label: Map.get(mutation, "proccode", "custom block"),
+      label: custom_procedure_display_label(mutation),
       parts: render_block_parts(fields, inputs, blocks, "procedures_definition"),
       branches: render_block_branches(inputs, blocks)
     }
   end
+
+  defp custom_procedure_display_label(mutation) when is_map(mutation) do
+    proccode = Map.get(mutation, "proccode", "custom block")
+    argument_names = mutation_json_array(mutation, "argumentnames")
+
+    replace_procedure_placeholders(proccode, argument_names)
+  end
+
+  defp custom_procedure_display_label(_), do: "custom block"
+
+  defp replace_procedure_placeholders(proccode, argument_names)
+       when is_binary(proccode) and is_list(argument_names) do
+    {parts, remaining_names} =
+      Regex.split(~r/(%[sbn])/, proccode, include_captures: true)
+      |> Enum.map_reduce(argument_names, fn
+        <<"%"::binary, _type::binary-size(1)>> = placeholder, [name | rest] ->
+          value = if is_binary(name) and name != "", do: name, else: placeholder
+          {value, rest}
+
+        part, names ->
+          {part, names}
+      end)
+
+    if remaining_names == argument_names do
+      proccode
+    else
+      Enum.join(parts)
+    end
+  end
+
+  defp replace_procedure_placeholders(proccode, _argument_names), do: proccode
+
+  defp argument_reporter_label(block) do
+    block
+    |> Map.get("fields", %{})
+    |> Map.get("VALUE", [])
+    |> List.first()
+    |> case do
+      name when is_binary(name) and name != "" -> name
+      _ -> opcode_label(Map.get(block, "opcode", ""))
+    end
+  end
+
+  defp mutation_json_array(mutation, key) when is_map(mutation) do
+    case Map.get(mutation, key) do
+      value when is_list(value) ->
+        Enum.map(value, &to_string/1)
+
+      value when is_binary(value) ->
+        case Jason.decode(value) do
+          {:ok, list} when is_list(list) -> Enum.map(list, &to_string/1)
+          _ -> []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp mutation_json_array(_, _), do: []
 
   # ---- costumes & sounds ----
 
@@ -781,7 +1001,10 @@ defmodule ScratchInspector.Parser do
     |> Map.get("costumes", [])
     |> Enum.with_index()
     |> Enum.map(fn {costume, idx} ->
-      md5ext = Map.get(costume, "md5ext") || Map.get(costume, "assetId", "") <> "." <> Map.get(costume, "dataFormat", "svg")
+      md5ext =
+        Map.get(costume, "md5ext") ||
+          Map.get(costume, "assetId", "") <> "." <> Map.get(costume, "dataFormat", "svg")
+
       data_format = Map.get(costume, "dataFormat", "svg") |> String.downcase()
       mime = costume_mime(data_format)
 
@@ -790,7 +1013,8 @@ defmodule ScratchInspector.Parser do
           {:ok, binary} when idx == 0 and byte_size(binary) <= @thumbnail_inline_limit_bytes ->
             Base.encode64(binary)
 
-          _ -> nil
+          _ ->
+            nil
         end
 
       %{
@@ -803,21 +1027,32 @@ defmodule ScratchInspector.Parser do
     end)
   end
 
-  defp extract_sounds(target, _zip_files) do
+  defp extract_sounds(target, zip_files) do
     target
     |> Map.get("sounds", [])
     |> Enum.map(fn sound ->
+      md5ext =
+        Map.get(sound, "md5ext") ||
+          Map.get(sound, "assetId", "") <> "." <> Map.get(sound, "dataFormat", "wav")
+
       data_format = Map.get(sound, "dataFormat", "wav") |> String.downcase()
       mime = sound_mime(data_format)
 
-      # Avoid large audio payload serialization during initial parse.
-      base64_data = nil
+      base64_data =
+        case find_file_data(zip_files, md5ext) do
+          {:ok, binary} when byte_size(binary) <= @sound_inline_limit_bytes ->
+            Base.encode64(binary)
+
+          _ ->
+            nil
+        end
 
       %{
         name: Map.get(sound, "name", "unknown"),
         data_format: data_format,
         mime: mime,
         base64: base64_data,
+        asset_file: md5ext,
         rate: Map.get(sound, "rate"),
         sample_count: Map.get(sound, "sampleCount")
       }
@@ -852,49 +1087,56 @@ defmodule ScratchInspector.Parser do
       visited = MapSet.put(visited, start_id)
 
       case Map.get(blocks, start_id) do
-      nil ->
-        []
+        nil ->
+          []
 
-      block when is_map(block) ->
-        opcode = Map.get(block, "opcode", "")
-        label =
-          if opcode == "procedures_call" do
-            proccode = block |> Map.get("mutation", %{}) |> Map.get("proccode", "?")
-            proccode
-          else
-            opcode_label(opcode)
-          end
-        inputs = Map.get(block, "inputs", %{})
-        fields = Map.get(block, "fields", %{})
+        block when is_map(block) ->
+          opcode = Map.get(block, "opcode", "")
 
-        # パラメータを収集
-        params = extract_block_params(inputs, fields, blocks)
+          label =
+            if opcode == "procedures_call" do
+              proccode = block |> Map.get("mutation", %{}) |> Map.get("proccode", "?")
+              proccode
+            else
+              opcode_label(opcode)
+            end
 
-        current = %{
-          label: label,
-          opcode: opcode,
-          depth: depth,
-          params: params
-        }
+          inputs = Map.get(block, "inputs", %{})
+          fields = Map.get(block, "fields", %{})
 
-        # サブスタック（if/else/repeat の中身）
-        substacks =
-          inputs
-          |> Enum.filter(fn {key, _} -> String.starts_with?(key, "SUBSTACK") end)
-          |> Enum.sort_by(fn {key, _} -> key end)
-          |> Enum.flat_map(fn {_key, val} ->
-            substack_id = extract_input_id(val)
-            if substack_id, do: walk_block_chain(substack_id, blocks, depth + 1, visited), else: []
-          end)
+          # パラメータを収集
+          params = extract_block_params(inputs, fields, blocks)
 
-        # 次のブロック
-        next_id = Map.get(block, "next")
-        next_blocks = if next_id, do: walk_block_chain(next_id, blocks, depth, visited), else: []
+          current = %{
+            label: label,
+            opcode: opcode,
+            depth: depth,
+            params: params
+          }
 
-        [current] ++ substacks ++ next_blocks
+          # サブスタック（if/else/repeat の中身）
+          substacks =
+            inputs
+            |> Enum.filter(fn {key, _} -> String.starts_with?(key, "SUBSTACK") end)
+            |> Enum.sort_by(fn {key, _} -> key end)
+            |> Enum.flat_map(fn {_key, val} ->
+              substack_id = extract_input_id(val)
 
-      _ ->
-        []
+              if substack_id,
+                do: walk_block_chain(substack_id, blocks, depth + 1, visited),
+                else: []
+            end)
+
+          # 次のブロック
+          next_id = Map.get(block, "next")
+
+          next_blocks =
+            if next_id, do: walk_block_chain(next_id, blocks, depth, visited), else: []
+
+          [current] ++ substacks ++ next_blocks
+
+        _ ->
+          []
       end
     end
   end
@@ -903,7 +1145,8 @@ defmodule ScratchInspector.Parser do
     # inputs の形式: [shadow_type, id_or_array]
     case val do
       [_, id] when is_binary(id) -> id
-      [_, [_, id | _]] when is_binary(id) -> nil  # リテラル値
+      # リテラル値
+      [_, [_, id | _]] when is_binary(id) -> nil
       _ -> nil
     end
   end
@@ -923,7 +1166,9 @@ defmodule ScratchInspector.Parser do
 
     input_params =
       inputs
-      |> Enum.reject(fn {key, _} -> String.starts_with?(key, "SUBSTACK") || key == "custom_block" end)
+      |> Enum.reject(fn {key, _} ->
+        String.starts_with?(key, "SUBSTACK") || key == "custom_block"
+      end)
       |> Enum.flat_map(fn {_key, val} ->
         # Scratch input encoding:
         #   [shadow, second]          — shadow=1/2: literal or reporter (no fallback)
@@ -940,23 +1185,34 @@ defmodule ScratchInspector.Parser do
 
   # プリミティブ値: [type, value, ...] — type 4-11: number/string literal, 12-13: inline variable/list
   defp extract_input_value([_type, value | _], _blocks) when is_binary(value), do: [value]
-  defp extract_input_value([_type, value | _], _blocks) when is_number(value), do: [to_string(value)]
+
+  defp extract_input_value([_type, value | _], _blocks) when is_number(value),
+    do: [to_string(value)]
+
   # reporter ブロック参照: "block_id"
-  defp extract_input_value(id, blocks) when is_binary(id), do: [reporter_label(Map.get(blocks, id), blocks)]
+  defp extract_input_value(id, blocks) when is_binary(id),
+    do: [reporter_label(Map.get(blocks, id), blocks)]
+
   defp extract_input_value(_, _), do: []
 
   defp reporter_label(nil, _blocks), do: "?"
+
   defp reporter_label(block, blocks) do
     case Map.get(block, "opcode") do
       "data_variable" ->
         block |> Map.get("fields", %{}) |> Map.get("VARIABLE", []) |> List.first() || "?"
+
       "data_listcontents" ->
         block |> Map.get("fields", %{}) |> Map.get("LIST", []) |> List.first() || "?"
+
       opc ->
         inputs = Map.get(block, "inputs", %{})
         fields = Map.get(block, "fields", %{})
         inner = extract_block_params(inputs, fields, blocks)
-        if Enum.empty?(inner), do: opcode_label(opc), else: "#{opcode_label(opc)}(#{Enum.join(inner, ", ")})"
+
+        if Enum.empty?(inner),
+          do: opcode_label(opc),
+          else: "#{opcode_label(opc)}(#{Enum.join(inner, ", ")})"
     end
   end
 
@@ -1070,7 +1326,8 @@ defmodule ScratchInspector.Parser do
   defp event_detail_label("event_whenbroadcastreceived", _label), do: "[BROADCAST_OPTION]を受け取ったとき"
   defp event_detail_label(_opcode, label), do: label
 
-  defp event_detail_fields("event_whenbroadcastreceived", value) when is_binary(value) and value != "" do
+  defp event_detail_fields("event_whenbroadcastreceived", value)
+       when is_binary(value) and value != "" do
     [%{name: "BROADCAST_OPTION", value: value}]
   end
 
@@ -1113,7 +1370,8 @@ defmodule ScratchInspector.Parser do
     # procedure_call ブロックから呼び出し関係を構築
     call_map = build_call_map(blocks)
 
-    Enum.map(definitions, fn {_def_id, name, code_blocks, render_blocks, detail_header, detail_blocks} ->
+    Enum.map(definitions, fn {_def_id, name, code_blocks, render_blocks, detail_header,
+                              detail_blocks} ->
       callers = Map.get(call_map, name, [])
 
       %{
@@ -1135,8 +1393,10 @@ defmodule ScratchInspector.Parser do
     end)
     |> Enum.reduce(%{}, fn {id, block}, acc ->
       proccode = block |> Map.get("mutation", %{}) |> Map.get("proccode", "unknown")
+
       # 呼び出し元のハットブロック ID（ラベルではなく ID で管理し同名イベントを区別）
       caller_id = find_hat_block_id(id, blocks)
+
       if caller_id do
         Map.update(acc, proccode, [caller_id], &[caller_id | &1])
       else
@@ -1150,11 +1410,18 @@ defmodule ScratchInspector.Parser do
     parent_id = if block, do: Map.get(block, "parent"), else: nil
 
     cond do
-      is_nil(block) -> nil
-      is_nil(parent_id) -> block_id
-      MapSet.member?(visited, block_id) -> nil
+      is_nil(block) ->
+        nil
+
+      is_nil(parent_id) ->
+        block_id
+
+      MapSet.member?(visited, block_id) ->
+        nil
+
       true ->
         parent = Map.get(blocks, parent_id)
+
         if parent && is_nil(Map.get(parent, "parent")) do
           parent_id
         else
@@ -1172,6 +1439,7 @@ defmodule ScratchInspector.Parser do
 
   defp extract_local_variables(targets) do
     sprite_targets = Enum.reject(targets, fn t -> Map.get(t, "isStage", false) end)
+
     Enum.flat_map(sprite_targets, fn t ->
       do_extract_variables(t, :local, [t])
     end)
@@ -1186,7 +1454,15 @@ defmodule ScratchInspector.Parser do
       vars
       |> Enum.map(fn {_id, [name | _]} ->
         {readers, writers} = find_variable_refs(name, all_targets)
-        %{name: name, kind: :variable, scope: scope, sprite: sprite_name, readers: readers, writers: writers}
+
+        %{
+          name: name,
+          kind: :variable,
+          scope: scope,
+          sprite: sprite_name,
+          readers: readers,
+          writers: writers
+        }
       end)
       |> Enum.filter(fn v -> Enum.any?(v.readers) or Enum.any?(v.writers) end)
 
@@ -1194,7 +1470,15 @@ defmodule ScratchInspector.Parser do
       lists
       |> Enum.map(fn {_id, [name | _]} ->
         {readers, writers} = find_list_refs(name, all_targets)
-        %{name: name, kind: :list, scope: scope, sprite: sprite_name, readers: readers, writers: writers}
+
+        %{
+          name: name,
+          kind: :list,
+          scope: scope,
+          sprite: sprite_name,
+          readers: readers,
+          writers: writers
+        }
       end)
       |> Enum.filter(fn v -> Enum.any?(v.readers) or Enum.any?(v.writers) end)
 
@@ -1203,14 +1487,25 @@ defmodule ScratchInspector.Parser do
 
   defp find_variable_refs(var_name, targets) do
     readers = find_block_refs(var_name, targets, ["data_variable"], "VARIABLE", :read)
-    writers = find_block_refs(var_name, targets, ["data_setvariableto", "data_changevariableby"], "VARIABLE", :write)
+
+    writers =
+      find_block_refs(
+        var_name,
+        targets,
+        ["data_setvariableto", "data_changevariableby"],
+        "VARIABLE",
+        :write
+      )
 
     {readers, writers}
   end
 
   defp find_list_refs(list_name, targets) do
-    reader_opcodes = ~w(data_listcontents data_itemnumoflist data_itemoflist data_lengthoflist data_listcontainsitem)
-    writer_opcodes = ~w(data_addtolist data_deleteoflist data_deletealloflist data_insertatlist data_replaceitemoflist)
+    reader_opcodes =
+      ~w(data_listcontents data_itemnumoflist data_itemoflist data_lengthoflist data_listcontainsitem)
+
+    writer_opcodes =
+      ~w(data_addtolist data_deleteoflist data_deletealloflist data_insertatlist data_replaceitemoflist)
 
     readers = find_block_refs(list_name, targets, reader_opcodes, "LIST", :read)
     writers = find_block_refs(list_name, targets, writer_opcodes, "LIST", :write)

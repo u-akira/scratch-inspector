@@ -5,19 +5,34 @@
 /* This file is for your main application CSS */
 
 .scratch-detail-panel {
-  @apply max-h-[36rem] overflow-auto rounded-3xl bg-[#eef3f8] p-4 shadow-sm transition-all duration-150 ease-out;
+  @apply rounded-3xl bg-[#eef3f8] p-4 shadow-sm transition-all duration-150 ease-out;
+}
+
+.scratch-flow-inline-detail {
+  max-height: min(70vh, 34rem);
+}
+
+.scratch-flow-detail-body {
+  @apply flex-1 min-h-0 overflow-auto bg-gray-50 p-4 pr-12 pt-5;
+}
+
+.costume-preview__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .scratch-block-stack {
-  @apply w-full min-w-0;
+  @apply flex min-w-full w-max max-w-none flex-col items-start;
 }
 
 .scratch-block-stack-wrapper {
-  @apply max-w-full overflow-x-auto;
+  @apply min-w-full w-max max-w-none overflow-visible;
 }
 
 .scratch-block {
-  @apply inline-flex min-h-[42px] max-w-full flex-wrap items-center gap-1.5 border border-black/10 px-3 py-2 text-sm font-semibold text-white shadow-[inset_0_-2px_0_rgba(0,0,0,0.18)] transition duration-150 ease-in-out;
+  @apply inline-flex min-h-[42px] w-max max-w-none flex-nowrap items-center gap-1.5 border border-black/10 px-3 py-2 text-sm font-semibold text-white shadow-[inset_0_-2px_0_rgba(0,0,0,0.18)] transition duration-150 ease-in-out;
 }
 .scratch-block--hat {
   @apply rounded-t-[1.4rem] rounded-b-lg;
@@ -33,7 +48,25 @@
 }
 
 .scratch-inline-block {
-  @apply inline-flex max-w-full flex-wrap items-center gap-1 px-2 py-1 text-xs font-semibold text-white rounded-full;
+  @apply inline-flex w-max max-w-none flex-nowrap items-center gap-1 px-2 py-1 text-xs font-semibold text-white rounded-full;
+}
+
+.scratch-block--themed {
+  background-color: var(--scratch-block-color);
+  border-color: var(--scratch-block-tertiary);
+  box-shadow: inset 0 -2px 0 var(--scratch-block-secondary);
+}
+
+.scratch-inline-block.scratch-block--themed {
+  box-shadow: inset 0 -1px 0 var(--scratch-block-secondary);
+}
+
+.scratch-argument-reporter {
+  @apply bg-[#D83B6A] text-white ring-1 ring-[#B72F59] shadow-[inset_0_-2px_0_rgba(0,0,0,0.18)];
+}
+
+.scratch-inline-block.scratch-argument-reporter {
+  @apply px-3 py-1.5;
 }
 
 .hexagon {
@@ -52,7 +85,8 @@
 }
 .scratch-slot--boolean.scratch-slot--block {
   @apply rounded-none bg-transparent p-0 text-[#0f3d29] ring-0;
-  clip-path: polygon(10% 0%, 90% 0%, 100% 50%, 90% 100%, 10% 100%, 0% 50%);
+  clip-path: none;
+  overflow: visible;
 }
 .scratch-slot--round {
   @apply rounded-full ring-1 px-3;
@@ -74,6 +108,8 @@
 }
 .scratch-slot--block {
   @apply rounded-md bg-white/20 ring-1 ring-slate-200/30;
+  flex: 0 0 auto;
+  max-width: none;
 }
 .scratch-slot--nested-logical {
   @apply gap-0.5 bg-white/10 ring-white/25;
@@ -95,7 +131,81 @@
   @apply leading-tight;
 }
 .scratch-block-item-definition-name {
-  @apply inline-flex items-center rounded-full bg-pink-700 px-2 py-1 text-xs font-semibold text-white ring-1 ring-pink-400/50;
+  @apply inline-flex items-center px-1 text-sm font-semibold text-white;
+}
+.scratch-block-item-definition-arg {
+  @apply inline-flex items-center rounded-full bg-[#B52F63] px-3 py-1 text-xs font-semibold text-white ring-1 ring-[#FCA3BD]/60 shadow-[inset_0_-1px_0_rgba(0,0,0,0.2)];
+}
+.scratch-flow-arg-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  margin: 0 0.16em !important;
+  padding: 0.16em 0.62em !important;
+  border: 1px solid rgba(252, 163, 189, 0.78) !important;
+  border-radius: 9999px !important;
+  background: #b52f63 !important;
+  color: #ffffff !important;
+  font-size: 0.86em !important;
+  font-weight: 700 !important;
+  line-height: 1.1 !important;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.22) !important;
+  white-space: nowrap !important;
+}
+.scratch-flow-flag-label {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.28em !important;
+  white-space: nowrap !important;
+}
+.scratch-flow-flag-label img {
+  display: inline-block !important;
+  width: 1em !important;
+  height: 1em !important;
+  max-width: none !important;
+  flex: 0 0 auto !important;
+}
+.scratch-flow-edge {
+  transition:
+    opacity 120ms ease,
+    stroke-width 120ms ease,
+    filter 120ms ease;
+}
+.scratch-flow-edge-highlight {
+  opacity: 1 !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.24));
+}
+.scratch-flow-edge-dim {
+  opacity: 0.18 !important;
+}
+.mermaid g.node.selectedNode rect,
+.mermaid g.node.selectedNode polygon,
+.mermaid g.node.selectedNode path {
+  stroke: #2563eb !important;
+  stroke-width: 4px !important;
+  filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.24));
+}
+.scratch-color-input {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.55rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  box-shadow:
+    inset 0 -1px 0 rgba(0, 0, 0, 0.14),
+    0 1px 1px rgba(0, 0, 0, 0.08);
+}
+.scratch-color-input__swatch {
+  width: 1.14rem;
+  height: 1.14rem;
+  border-radius: 9999px;
+  background: var(--scratch-color-value);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 .scratch-block-child-container {
   @apply ml-5 mt-1.5 w-[calc(100%-1rem)] min-w-[14rem] rounded-b-[1.25rem] bg-slate-950/5 pr-1 ring-1 ring-slate-300/10;
@@ -130,11 +240,11 @@
 }
 
 .scratch-c-block-frame {
-  @apply -mt-px inline-block w-fit max-w-full;
+  @apply -mt-px inline-flex w-max max-w-none flex-col items-start;
 }
 
 .scratch-c-block-scope {
-  @apply w-full rounded-bl-[1.1rem] bg-transparent pl-0 pr-2 pb-2 pt-1;
+  @apply min-w-full w-max max-w-none rounded-bl-[1.1rem] bg-transparent pl-0 pr-2 pb-2 pt-1;
   border-left: 10px solid var(--c-block-accent, #FFAB19);
   border-bottom: 10px solid var(--c-block-accent, #FFAB19);
 }

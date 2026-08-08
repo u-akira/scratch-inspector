@@ -14,149 +14,149 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
 
   def build_flow_mermaid(_project, nil, _flow_detail), do: nil
 
-  def build_flow_mermaid(project, target, flow_detail) do
+  def build_flow_mermaid(project, target, _flow_detail) do
     scripts =
       target.top_scripts
       |> Enum.filter(&event_hat?(&1.hat_opcode))
 
     custom_blocks = target.custom_blocks
 
-      script_nodes =
-        scripts
-        |> Enum.with_index(1)
-        |> Enum.map(fn {script, idx} ->
-          %{
-            id: "script_#{idx}",
-            detail:
-              flow_detail_payload(
-                %{
-                  kind: "script",
-                  id: script.id,
-                  hat_opcode: script.hat_opcode,
-                  hat_label: script.hat_label
-                },
-                target
-              ),
-            label: flow_node_label(script),
-            class: :script,
-            script: script
-          }
-        end)
-
-      script_node_ids = Map.new(script_nodes, fn node -> {node.script.id, node.id} end)
-
-      block_nodes =
-        custom_blocks
-        |> Enum.with_index(1)
-        |> Enum.map(fn {block_def, idx} ->
-          %{
-            id: "block_#{idx}",
-            detail: flow_detail_payload(%{kind: "block_def", id: block_def.name}, target),
-            label: block_def.name,
-            class: :block_def,
-            block_def: block_def
-          }
-        end)
-
-      block_node_ids = Map.new(block_nodes, fn node -> {node.block_def.name, node.id} end)
-
-      broadcast_messages =
-        ((scripts |> Enum.flat_map(&broadcasts_sent_in_script(&1.blocks))) ++
-           (custom_blocks |> Enum.flat_map(&broadcasts_sent_in_script(&1.code_blocks))))
-        |> Enum.uniq()
-
-      {receiver_nodes, receiver_node_ids} =
-        broadcast_messages
-        |> Enum.flat_map(&find_broadcast_receivers(project, &1))
-        |> Enum.uniq_by(fn {receiver_target, script} ->
-          {receiver_target.name, receiver_target.is_stage, script.id}
-        end)
-        |> Enum.with_index(1)
-        |> Enum.map_reduce(%{}, fn {{receiver_target, script}, idx}, acc ->
-          current_target? =
-            receiver_target.name == target.name &&
-              Map.get(receiver_target, :is_stage, false) == Map.get(target, :is_stage, false)
-
-          node_id =
-            if current_target? do
-              Map.fetch!(script_node_ids, script.id)
-            else
-              "receiver_#{idx}"
-            end
-
-          node =
-            if current_target? do
-              nil
-            else
+    script_nodes =
+      scripts
+      |> Enum.with_index(1)
+      |> Enum.map(fn {script, idx} ->
+        %{
+          id: "script_#{idx}",
+          detail:
+            flow_detail_payload(
               %{
-                id: node_id,
-                detail: flow_detail_payload(%{kind: "script", id: script.id}, receiver_target),
-                label: receiver_label(receiver_target, script),
-                class: :receiver_script
-              }
-            end
+                kind: "script",
+                id: script.id,
+                hat_opcode: script.hat_opcode,
+                hat_label: script.hat_label
+              },
+              target
+            ),
+          label: flow_node_label(script),
+          class: :script,
+          script: script
+        }
+      end)
 
-          key = {receiver_target.name, receiver_target.is_stage, script.id}
-          {node, Map.put(acc, key, node_id)}
-        end)
+    script_node_ids = Map.new(script_nodes, fn node -> {node.script.id, node.id} end)
 
-      script_edges =
-        Enum.flat_map(script_nodes, fn node ->
-          called_edges =
-            blocks_called_by_script(custom_blocks, node.script.id)
-            |> Enum.map(fn block_def -> {node.id, Map.get(block_node_ids, block_def.name)} end)
+    block_nodes =
+      custom_blocks
+      |> Enum.with_index(1)
+      |> Enum.map(fn {block_def, idx} ->
+        %{
+          id: "block_#{idx}",
+          detail: flow_detail_payload(%{kind: "block_def", id: block_def.name}, target),
+          label: custom_block_flow_label(block_def),
+          class: :block_def,
+          block_def: block_def
+        }
+      end)
 
-          broadcast_edges =
-            broadcasts_sent_in_script(node.script.blocks)
-            |> Enum.flat_map(fn msg ->
-              find_broadcast_receivers(project, msg)
-              |> Enum.map(fn {receiver_target, script} ->
-                to_id =
-                  Map.get(
-                    receiver_node_ids,
-                    {receiver_target.name, receiver_target.is_stage, script.id}
-                  )
+    block_node_ids = Map.new(block_nodes, fn node -> {node.block_def.name, node.id} end)
 
-                {node.id, to_id}
-              end)
+    broadcast_messages =
+      ((scripts |> Enum.flat_map(&broadcasts_sent_in_script(&1.blocks))) ++
+         (custom_blocks |> Enum.flat_map(&broadcasts_sent_in_script(&1.code_blocks))))
+      |> Enum.uniq()
+
+    {receiver_nodes, receiver_node_ids} =
+      broadcast_messages
+      |> Enum.flat_map(&find_broadcast_receivers(project, &1))
+      |> Enum.uniq_by(fn {receiver_target, script} ->
+        {receiver_target.name, receiver_target.is_stage, script.id}
+      end)
+      |> Enum.with_index(1)
+      |> Enum.map_reduce(%{}, fn {{receiver_target, script}, idx}, acc ->
+        current_target? =
+          receiver_target.name == target.name &&
+            Map.get(receiver_target, :is_stage, false) == Map.get(target, :is_stage, false)
+
+        node_id =
+          if current_target? do
+            Map.fetch!(script_node_ids, script.id)
+          else
+            "receiver_#{idx}"
+          end
+
+        node =
+          if current_target? do
+            nil
+          else
+            %{
+              id: node_id,
+              detail: flow_detail_payload(%{kind: "script", id: script.id}, receiver_target),
+              label: receiver_label(receiver_target, script),
+              class: :receiver_script
+            }
+          end
+
+        key = {receiver_target.name, receiver_target.is_stage, script.id}
+        {node, Map.put(acc, key, node_id)}
+      end)
+
+    script_edges =
+      Enum.flat_map(script_nodes, fn node ->
+        called_edges =
+          blocks_called_by_script(custom_blocks, node.script.id)
+          |> Enum.map(fn block_def -> {node.id, Map.get(block_node_ids, block_def.name)} end)
+
+        broadcast_edges =
+          broadcasts_sent_in_script(node.script.blocks)
+          |> Enum.flat_map(fn msg ->
+            find_broadcast_receivers(project, msg)
+            |> Enum.map(fn {receiver_target, script} ->
+              to_id =
+                Map.get(
+                  receiver_node_ids,
+                  {receiver_target.name, receiver_target.is_stage, script.id}
+                )
+
+              {node.id, to_id}
             end)
+          end)
 
-          called_edges ++ broadcast_edges
-        end)
+        called_edges ++ broadcast_edges
+      end)
 
-      block_edges =
-        Enum.flat_map(block_nodes, fn node ->
-          call_edges =
-            direct_calls_from_block_def(node.block_def, custom_blocks)
-            |> Enum.map(fn sub_cb -> {node.id, Map.get(block_node_ids, sub_cb.name)} end)
+    block_edges =
+      Enum.flat_map(block_nodes, fn node ->
+        call_edges =
+          direct_calls_from_block_def(node.block_def, custom_blocks)
+          |> Enum.map(fn sub_cb -> {node.id, Map.get(block_node_ids, sub_cb.name)} end)
 
-          broadcast_edges =
-            broadcasts_sent_in_script(node.block_def.code_blocks)
-            |> Enum.flat_map(fn msg ->
-              find_broadcast_receivers(project, msg)
-              |> Enum.map(fn {receiver_target, script} ->
-                to_id =
-                  Map.get(
-                    receiver_node_ids,
-                    {receiver_target.name, receiver_target.is_stage, script.id}
-                  )
+        broadcast_edges =
+          broadcasts_sent_in_script(node.block_def.code_blocks)
+          |> Enum.flat_map(fn msg ->
+            find_broadcast_receivers(project, msg)
+            |> Enum.map(fn {receiver_target, script} ->
+              to_id =
+                Map.get(
+                  receiver_node_ids,
+                  {receiver_target.name, receiver_target.is_stage, script.id}
+                )
 
-                {node.id, to_id}
-              end)
+              {node.id, to_id}
             end)
+          end)
 
-          call_edges ++ broadcast_edges
-        end)
+        call_edges ++ broadcast_edges
+      end)
 
-      nodes =
-        script_nodes ++ block_nodes ++ Enum.reject(receiver_nodes, &is_nil/1)
+    nodes =
+      script_nodes ++ block_nodes ++ Enum.reject(receiver_nodes, &is_nil/1)
 
-      edges =
-        (script_edges ++ block_edges)
-        |> Enum.reject(fn {from_id, to_id} -> is_nil(from_id) or is_nil(to_id) end)
-        |> Enum.uniq()
+    edges =
+      (script_edges ++ block_edges)
+      |> Enum.reject(fn {from_id, to_id} -> is_nil(from_id) or is_nil(to_id) end)
+      |> Enum.uniq()
 
-      if Enum.empty?(nodes), do: nil, else: render_flow_mermaid(nodes, edges, flow_detail)
+    if Enum.empty?(nodes), do: nil, else: render_flow_mermaid(nodes, edges)
   end
 
   defp blocks_called_by_script(custom_blocks, hat_label) do
@@ -201,41 +201,28 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
     |> Enum.reject(&is_nil/1)
   end
 
-  defp render_flow_mermaid(nodes, edges, flow_detail) do
+  defp render_flow_mermaid(nodes, edges) do
     header = [
       "flowchart LR",
       "classDef scriptNode fill:#FFAB19,stroke:#CC8813,color:#ffffff,stroke-width:2px;",
       "classDef blockNode fill:#FF6680,stroke:#D64C68,color:#ffffff,stroke-width:2px;",
-      "classDef receiverNode fill:#ffffff,stroke:#4C97FF,color:#1f2937,stroke-width:2px;",
-      "classDef selectedNode stroke:#2563EB,stroke-width:4px;"
+      "classDef receiverNode fill:#ffffff,stroke:#4C97FF,color:#1f2937,stroke-width:2px;"
     ]
 
     body =
       Enum.flat_map(nodes, fn node ->
-        selected? = selected_flow_node?(flow_detail, node.detail)
         payload = mermaid_payload(node.detail)
 
         [
           ~s(#{node.id}["#{escape_mermaid_label(node.label)}"]),
           "class #{node.id} #{mermaid_class(node.class)};"
-        ] ++
-          if(selected?, do: ["class #{node.id} selectedNode;"], else: []) ++
-          ["click #{node.id} call __mermaidNodeClick(\"#{payload}\")"]
+        ] ++ ["click #{node.id} call __mermaidNodeClick(\"#{payload}\")"]
       end)
 
     edge_lines = Enum.map(edges, fn {from_id, to_id} -> "#{from_id} --> #{to_id}" end)
 
     Enum.join(header ++ body ++ edge_lines, "\n")
   end
-
-  defp selected_flow_node?(nil, _detail), do: false
-
-  defp selected_flow_node?(current, detail),
-    do:
-      InspectorEvents.flow_detail_same?(
-        InspectorEvents.normalize_flow_detail(current),
-        InspectorEvents.normalize_flow_detail(detail)
-      )
 
   defp flow_detail_payload(detail, target) do
     InspectorEvents.normalize_flow_detail(%{
@@ -259,7 +246,7 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
   defp escape_mermaid_label(label) do
     label = to_string(label || "")
 
-    if String.contains?(label, "<img ") do
+    if String.contains?(label, "<img ") or String.contains?(label, "<span ") do
       label
       |> String.replace("\n", "<br/>")
     else
@@ -278,34 +265,61 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
   end
 
   defp flow_node_label(%{hat_opcode: "event_whenflagclicked"}) do
-    ~s(<img src="/blocks-media/default/green-flag.svg" width="1em" height="1em" style="display:inline-block;width:1em;height:1em;max-width:none;vertical-align:-0.12em;margin-right:0.28em;" />が押されたとき)
+    ~s(<span class='scratch-flow-flag-label'><img src='/blocks-media/default/green-flag.svg' width='16' height='16' />が押されたとき</span>)
   end
 
   defp flow_node_label(script), do: script.hat_label
 
-  defp receiver_label(target, %{hat_opcode: "event_whenbroadcastreceived"}) do
-    with false <- Map.get(target, :is_stage, false),
-         {:ok, img_tag} <- receiver_costume_img_tag(target) do
-      "#{img_tag} #{display_name(target)}"
-    else
-      _ -> display_name(target)
+  defp custom_block_flow_label(%{
+         detail_header: %{mutation: mutation, label: fallback},
+         name: name
+       })
+       when is_map(mutation) do
+    proccode = Map.get(mutation, "proccode")
+    names = mutation_array(mutation, "argumentnames")
+
+    case custom_block_flow_label_from_proccode(proccode, names) do
+      "" -> fallback || name
+      label -> label
     end
+  end
+
+  defp custom_block_flow_label(%{detail_header: %{label: label}, name: name}), do: label || name
+  defp custom_block_flow_label(%{name: name}), do: name
+
+  defp custom_block_flow_label_from_proccode(proccode, names)
+       when is_binary(proccode) and is_list(names) and names != [] do
+    {items, used_arg?} =
+      Regex.split(~r/(%[sbn])/, proccode, include_captures: true)
+      |> Enum.map_reduce({names, false}, fn
+        <<"%"::binary, _type::binary-size(1)>> = placeholder, {[name | rest], _used_arg?} ->
+          arg = if is_binary(name) and name != "", do: name, else: placeholder
+          {flow_arg_span(arg), {rest, true}}
+
+        <<"%"::binary, _type::binary-size(1)>> = placeholder, {[], _used_arg?} ->
+          {flow_arg_span(placeholder), {[], true}}
+
+        text, {remaining_names, used_arg?} ->
+          {escape_inline_text(text), {remaining_names, used_arg?}}
+      end)
+
+    if used_arg?, do: Enum.join(items), else: ""
+  end
+
+  defp custom_block_flow_label_from_proccode(_, _), do: ""
+
+  defp flow_arg_span(value) do
+    escaped = escape_inline_text(value)
+
+    ~s(<span class='scratch-flow-arg-pill'>#{escaped}</span>)
+  end
+
+  defp receiver_label(target, %{hat_opcode: "event_whenbroadcastreceived"} = script) do
+    "#{display_name(target)}<br/>#{broadcast_receiver_event_html(script)}"
   end
 
   defp receiver_label(target, script) do
     "#{display_name(target)}<br/>#{script.hat_label}"
-  end
-
-  defp receiver_costume_img_tag(target) do
-    case List.first(Map.get(target, :costumes, [])) do
-      %{base64: b64, mime: mime}
-      when is_binary(b64) and b64 != "" and is_binary(mime) and mime != "" and byte_size(b64) <= 20_000 ->
-        {:ok,
-         ~s(<img src="data:#{mime};base64,#{b64}" width="1.1em" height="1.1em" style="display:inline-block;width:1.1em;height:1.1em;max-width:none;vertical-align:-0.14em;margin-right:0.30em;border-radius:2px;" />)}
-
-      _ ->
-        :error
-    end
   end
 
   defp mermaid_class(:script), do: "scriptNode"
@@ -316,4 +330,45 @@ defmodule ScratchInspectorWeb.Live.InspectorFlow do
 
   defp display_name(%{is_stage: true}), do: "背景"
   defp display_name(%{name: name}), do: name
+
+  defp broadcast_receiver_event_label(%{hat_label: hat_label}) when is_binary(hat_label) do
+    case Regex.run(~r/^(.*)を受け取ったとき$/, hat_label) do
+      [_, msg] when msg != "" -> msg
+      _ -> hat_label
+    end
+  end
+
+  defp broadcast_receiver_event_label(_), do: ""
+
+  defp broadcast_receiver_event_html(script) do
+    msg = escape_inline_text(broadcast_receiver_event_label(script))
+    ~s(<span style="font-size:0.82em;color:#6b7280;">#{msg}</span>)
+  end
+
+  defp escape_inline_text(text) do
+    text
+    |> to_string()
+    |> String.replace("&", "&amp;")
+    |> String.replace("\"", "&quot;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+  end
+
+  defp mutation_array(mutation, key) when is_map(mutation) do
+    case Map.get(mutation, key) do
+      value when is_list(value) ->
+        Enum.map(value, &to_string/1)
+
+      value when is_binary(value) ->
+        case Jason.decode(value) do
+          {:ok, list} when is_list(list) -> Enum.map(list, &to_string/1)
+          _ -> []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp mutation_array(_, _), do: []
 end
