@@ -18,6 +18,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
         <%= if @header_block do %>
           <.scratch_block block={@header_block} />
         <% end %>
+
         <div class="scratch-block-stack-wrapper">
           <.scratch_stack blocks={@blocks} />
         </div>
@@ -59,25 +60,32 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
 
     ~H"""
     <div class="flex w-max max-w-none flex-col items-start">
-      <div class={[
-        "scratch-block",
-        @category_class,
-        @category_theme_class,
-        @semantic_class,
-        @shape_class,
-        @c_block_join_class
-      ]} style={@category_style}>
+      <div
+        class={[
+          "scratch-block",
+          @category_class,
+          @category_theme_class,
+          @semantic_class,
+          @shape_class,
+          @c_block_join_class
+        ]}
+        style={@category_style}
+      >
         <span :if={@show_green_flag_icon} class="inline-flex shrink-0 items-center justify-center">
           <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
             <image height="24px" width="24px" href="/blocks-media/default/green-flag.svg"></image>
           </svg>
         </span>
         <img :if={@show_extension_icon} src={@microbit_icon_uri} alt="" class="h-5 w-5 shrink-0" />
-        <.toio_icon :if={@show_toio_icon} class="scratch-block-icon scratch-block-icon--toio h-5 w-5 shrink-0" />
+        <.toio_icon
+          :if={@show_toio_icon}
+          class="scratch-block-icon scratch-block-icon--toio h-5 w-5 shrink-0"
+        />
         <%= for item <- @items do %>
           <.scratch_block_item item={item} />
         <% end %>
       </div>
+
       <%= if Enum.any?(@block.children || []) do %>
         <%= if @c_block? do %>
           <div class="scratch-c-block-frame">
@@ -104,6 +112,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
                 <%= if child_name = scratch_child_name(child.name) do %>
                   <div class="scratch-block-child-label">{child_name}</div>
                 <% end %>
+
                 <div class="scratch-block-child-inner">
                   <.scratch_stack blocks={child.blocks} />
                 </div>
@@ -141,20 +150,21 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
             />
           </span>
         <% else %>
-        <%= if inline_block_without_slot_wrapper?(@item) do %>
-          <.scratch_inline_block block={@item.value.block} />
-        <% else %>
-          <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">
-            (
-          </span>
-          <.scratch_inline_block
-            block={@item.value.block}
-            nested={Map.get(@item.value, :nested_logical, false)}
-          />
-          <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">
-            )
-          </span>
-        <% end %>
+          <%= if inline_block_without_slot_wrapper?(@item) do %>
+            <.scratch_inline_block block={@item.value.block} />
+          <% else %>
+            <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">
+              (
+            </span>
+
+            <.scratch_inline_block
+              block={@item.value.block}
+              nested={Map.get(@item.value, :nested_logical, false)}
+            />
+            <span :if={Map.get(@item.value, :nested_logical, false)} class="scratch-nested-group-mark">
+              )
+            </span>
+          <% end %>
         <% end %>
       <% :input -> %>
         <%= if color = scratch_color_input_value(@item) do %>
@@ -162,14 +172,13 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
             <span class="scratch-color-input__swatch"></span>
           </span>
         <% else %>
-        <%= if scratch_timer_input?(@item) do %>
-          <span class={@item_class}>
-            <.timer_icon />
-            <span>{scratch_input_text(@item.value)}</span>
-          </span>
-        <% else %>
-          <span class={@item_class}>{scratch_input_text(@item.value)}</span>
-        <% end %>
+          <%= if scratch_timer_input?(@item) do %>
+            <span class={@item_class}>
+              <.timer_icon /> <span>{scratch_input_text(@item.value)}</span>
+            </span>
+          <% else %>
+            <span class={@item_class}>{scratch_input_text(@item.value)}</span>
+          <% end %>
         <% end %>
     <% end %>
     """
@@ -177,11 +186,7 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
 
   defp timer_icon(assigns) do
     ~H"""
-    <svg
-      class="scratch-timer-icon h-3.5 w-3.5 shrink-0"
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-    >
+    <svg class="scratch-timer-icon h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="8" cy="8.7" r="5.2" fill="#EEF3F8" stroke="#5F6368" stroke-width="1.2" />
       <path d="M6.1 1.8h3.8" stroke="#5F6368" stroke-width="1.4" stroke-linecap="round" />
       <path d="M8 3.5V2.2" stroke="#5F6368" stroke-width="1.2" stroke-linecap="round" />
@@ -219,16 +224,22 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
       |> assign(:nested_class, if(assigns.nested, do: "scratch-inline-block--nested", else: nil))
 
     ~H"""
-    <span class={[
-      "scratch-inline-block",
-      @category_class,
-      @category_theme_class,
-      @semantic_class,
-      @shape_class,
-      @nested_class
-    ]} style={@category_style}>
+    <span
+      class={[
+        "scratch-inline-block",
+        @category_class,
+        @category_theme_class,
+        @semantic_class,
+        @shape_class,
+        @nested_class
+      ]}
+      style={@category_style}
+    >
       <img :if={@show_extension_icon} src={@microbit_icon_uri} alt="" class="h-4 w-4 shrink-0" />
-      <.toio_icon :if={@show_toio_icon} class="scratch-block-icon scratch-block-icon--toio h-4 w-4 shrink-0" />
+      <.toio_icon
+        :if={@show_toio_icon}
+        class="scratch-block-icon scratch-block-icon--toio h-4 w-4 shrink-0"
+      />
       <%= for item <- @items do %>
         <.scratch_block_item item={item} />
       <% end %>
@@ -248,9 +259,21 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
         stroke-width="0.8"
         stroke-linejoin="round"
       />
-      <path d="M2.1 7.4 11.7 9l5.5-5.3" fill="none" stroke="#5C5142" stroke-width="0.7" stroke-linecap="round" />
+      <path
+        d="M2.1 7.4 11.7 9l5.5-5.3"
+        fill="none"
+        stroke="#5C5142"
+        stroke-width="0.7"
+        stroke-linecap="round"
+      />
       <path d="M11.7 9v8.1" fill="none" stroke="#5C5142" stroke-width="0.7" stroke-linecap="round" />
-      <path d="M5.4 11.8c.9-.7 2.1-.5 2.8.3M13.1 12.5c.7-.6 1.6-.5 2.1.1" fill="none" stroke="#BEB5AA" stroke-width="1.1" stroke-linecap="round" />
+      <path
+        d="M5.4 11.8c.9-.7 2.1-.5 2.8.3M13.1 12.5c.7-.6 1.6-.5 2.1.1"
+        fill="none"
+        stroke="#BEB5AA"
+        stroke-width="1.1"
+        stroke-linecap="round"
+      />
     </svg>
     """
   end
@@ -623,7 +646,9 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
 
   defp scratch_color_input_value(_), do: nil
 
-  defp scratch_timer_input?(%{kind: :input, name: "DURATION", parent_category: :toio_do}), do: true
+  defp scratch_timer_input?(%{kind: :input, name: "DURATION", parent_category: :toio_do}),
+    do: true
+
   defp scratch_timer_input?(_), do: false
 
   defp normalize_hex_color("#" <> hex) when byte_size(hex) == 6 do
@@ -637,8 +662,12 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks do
       nil -> ""
       %{kind: :literal, value: literal} when is_binary(literal) -> literal
       %{kind: :literal, value: literal} when is_number(literal) -> to_string(literal)
+      %{kind: :reference, label: label} when is_binary(label) -> label
+      %{kind: :reference, id: id} when is_binary(id) -> id
       %{"kind" => "literal", "value" => literal} when is_binary(literal) -> literal
       %{"kind" => "literal", "value" => literal} when is_number(literal) -> to_string(literal)
+      %{"kind" => "reference", "label" => label} when is_binary(label) -> label
+      %{"kind" => "reference", "id" => id} when is_binary(id) -> id
       value when is_binary(value) -> value
       value when is_number(value) -> to_string(value)
       value when is_atom(value) -> to_string(value)

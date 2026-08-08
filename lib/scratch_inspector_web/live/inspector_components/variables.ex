@@ -29,8 +29,16 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Variables do
       </h2>
       <%= if Enum.any?(@variables) or Enum.any?(@lists) do %>
         <div class="space-y-3">
-          <.variable_group title="変数" items={@variables} expanded_variable_key={@expanded_variable_key} />
-          <.variable_group title="リスト" items={@lists} expanded_variable_key={@expanded_variable_key} />
+          <.variable_group
+            title="変数"
+            items={@variables}
+            expanded_variable_key={@expanded_variable_key}
+          />
+          <.variable_group
+            title="リスト"
+            items={@lists}
+            expanded_variable_key={@expanded_variable_key}
+          />
         </div>
       <% else %>
         <.empty_state
@@ -87,7 +95,9 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Variables do
           </div>
           <p class="mt-1 text-xs text-gray-400">{variable_usage_count_text(@item)}</p>
         </div>
-        <span class="text-xs font-medium text-slate-400">{if @expanded?, do: "Hide", else: "Usage"}</span>
+        <span class="text-xs font-medium text-slate-400">
+          {if @expanded?, do: "Hide", else: "Usage"}
+        </span>
       </button>
       <%= if @expanded? do %>
         <div class="border-t border-gray-200 bg-slate-50 px-4 py-3">
@@ -97,7 +107,9 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Variables do
                 <div>
                   <div class="mb-2 flex items-center gap-2">
                     <span class="text-sm font-medium text-slate-700">{group.sprite}</span>
-                    <span class="text-xs text-slate-400">{if group.type == "stage", do: "Stage", else: "Sprite"}</span>
+                    <span class="text-xs text-slate-400">
+                      {if group.type == "stage", do: "Stage", else: "Sprite"}
+                    </span>
                   </div>
                   <div class="space-y-2">
                     <%= for usage <- group.usages do %>
@@ -115,7 +127,9 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Variables do
                             <%= for access <- usage.accesses do %>
                               <span class={access_badge_class(access)}>{access_label(access)}</span>
                             <% end %>
-                            <span class="truncate text-xs font-medium text-slate-700">{usage.detail_label}</span>
+                            <span class="truncate text-xs font-medium text-slate-700">
+                              {usage.detail_label}
+                            </span>
                           </div>
                         </div>
                         <span class="text-xs text-slate-400">Open</span>
@@ -156,7 +170,9 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Variables do
 
   defp grouped_variable_usages(item) do
     (item.readers ++ item.writers)
-    |> Enum.group_by(fn ref -> {ref.sprite, ref.type, ref.detail_kind, ref.detail_id, ref.detail_label} end)
+    |> Enum.group_by(fn ref ->
+      {ref.sprite, ref.type, ref.detail_kind, ref.detail_id, ref.detail_label}
+    end)
     |> Enum.map(fn {{sprite, type, detail_kind, detail_id, detail_label}, refs} ->
       %{
         sprite: sprite,
@@ -169,7 +185,11 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Variables do
     end)
     |> Enum.group_by(fn usage -> {usage.sprite, usage.type} end)
     |> Enum.map(fn {{sprite, type}, usages} ->
-      %{sprite: sprite, type: type, usages: Enum.sort_by(usages, &String.downcase(&1.detail_label))}
+      %{
+        sprite: sprite,
+        type: type,
+        usages: Enum.sort_by(usages, &String.downcase(&1.detail_label))
+      }
     end)
     |> Enum.sort_by(fn group -> {group.type != "stage", String.downcase(group.sprite)} end)
   end
@@ -181,10 +201,19 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.Variables do
 
   defp scope_label(:global), do: "Global"
   defp scope_label(:local), do: "Local"
-  defp scope_badge_class(:global), do: "rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700"
-  defp scope_badge_class(:local), do: "rounded-full bg-orange-100 px-2 py-0.5 text-xs text-orange-700"
+
+  defp scope_badge_class(:global),
+    do: "rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700"
+
+  defp scope_badge_class(:local),
+    do: "rounded-full bg-orange-100 px-2 py-0.5 text-xs text-orange-700"
+
   defp access_label(:read), do: "読む"
   defp access_label(:write), do: "書く"
-  defp access_badge_class(:read), do: "rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
-  defp access_badge_class(:write), do: "rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700"
+
+  defp access_badge_class(:read),
+    do: "rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
+
+  defp access_badge_class(:write),
+    do: "rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700"
 end

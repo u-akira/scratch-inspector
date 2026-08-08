@@ -90,7 +90,10 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItems do
   end
 
   defp placeholder_aliases("BTN"), do: ["buttons"]
-  defp placeholder_aliases("DIRECTION"), do: ["tiltDirectionAny", "moveDirections", "rotateDirections"]
+
+  defp placeholder_aliases("DIRECTION"),
+    do: ["tiltDirectionAny", "moveDirections", "rotateDirections"]
+
   defp placeholder_aliases(_name), do: []
 
   defp entry_name(entry) when is_map(entry) do

@@ -3,6 +3,7 @@ defmodule ScratchInspector.Parser do
   @thumbnail_inline_limit_bytes 300_000
   @sound_inline_limit_bytes 1_500_000
   @heavy_sprite_block_threshold 3_000
+  @compact_detail_inline_depth_limit 4
   @moduledoc """
   Scratch プロジェクトファイルのパーサー。
   .sb3 / .sb2 は ZIP 内の project.json を解析。
@@ -21,6 +22,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("control_repeat"), do: "[TIMES] 回繰り返す"
   defp opcode_label("control_forever"), do: "ずっと"
   defp opcode_label("control_stop"), do: "[STOP_OPTION] "
+  defp opcode_label("control_wait_until"), do: "[CONDITION] まで待つ"
   defp opcode_label("event_whenflagclicked"), do: "緑の旗がクリックされたとき"
   defp opcode_label("event_whenkeypressed"), do: "[KEY_OPTION] キーが押されたとき"
   defp opcode_label("event_whenthisspriteclicked"), do: "このスプライトがクリックされたとき"
@@ -230,6 +232,25 @@ defmodule ScratchInspector.Parser do
     {:error, "unsupported extension for costume enrich: #{ext}"}
   end
 
+  def enrich_target_from_archive(path, ext, name, type) when ext in [".sb2", ".sb3"] do
+    with {:ok, files} <- extract_zip(path),
+         {:ok, json} <- find_project_json(files),
+         {:ok, data} <- Jason.decode(json),
+         {:ok, target, is_stage} <- find_target_data(data, name, type) do
+      {:ok,
+       build_sprite(target, files, is_stage,
+         defer_heavy: false,
+         include_assets: false,
+         include_render_blocks: false,
+         detail_payload: :compact
+       )}
+    end
+  end
+
+  def enrich_target_from_archive(_path, ext, _name, _type) do
+    {:error, "unsupported extension for deferred target enrich: #{ext}"}
+  end
+
   def enrich_deferred_sprite(%{deferred_analysis: true, raw_blocks: blocks} = sprite)
       when is_map(blocks) do
     custom_blocks = extract_custom_blocks(blocks)
@@ -417,10 +438,14 @@ defmodule ScratchInspector.Parser do
     Map.put(target, :costumes, costumes)
   end
 
-  defp build_sprite(target, zip_files, is_stage) do
+  defp build_sprite(target, zip_files, is_stage, opts \\ []) do
     t0 = System.monotonic_time(:millisecond)
     name = Map.get(target, "name", "Unknown")
     blocks = Map.get(target, "blocks", %{})
+    defer_heavy? = Keyword.get(opts, :defer_heavy, true)
+    include_assets? = Keyword.get(opts, :include_assets, true)
+    include_render_blocks? = Keyword.get(opts, :include_render_blocks, true)
+    detail_payload = Keyword.get(opts, :detail_payload, :full)
 
     Logger.info(
       "[parser] build_sprite start name=#{name} stage=#{is_stage} blocks=#{map_size(blocks)}"
@@ -441,24 +466,32 @@ defmodule ScratchInspector.Parser do
     )
 
     {custom_blocks, top_scripts, deferred_analysis, raw_blocks} =
-      if map_size(blocks) > @heavy_sprite_block_threshold do
+      if defer_heavy? and map_size(blocks) > @heavy_sprite_block_threshold do
         Logger.warning(
           "[parser] build_sprite heavy target skipped name=#{name} blocks=#{map_size(blocks)} threshold=#{@heavy_sprite_block_threshold}"
         )
 
         # Do not retain huge raw block maps in LiveView assigns.
         # Build a lightweight flow surface and finish here.
-        {[], extract_top_scripts_light(blocks), false, nil}
+        {[], extract_top_scripts_light(blocks), true, nil}
       else
         t = System.monotonic_time(:millisecond)
-        custom_blocks = extract_custom_blocks(blocks)
+
+        custom_blocks =
+          with_detail_payload_mode(detail_payload, fn ->
+            extract_custom_blocks(blocks, include_render_blocks: include_render_blocks?)
+          end)
 
         Logger.info(
           "[parser] build_sprite custom_blocks done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}"
         )
 
         t = System.monotonic_time(:millisecond)
-        top_scripts = extract_top_scripts(blocks)
+
+        top_scripts =
+          with_detail_payload_mode(detail_payload, fn ->
+            extract_top_scripts(blocks, include_render_blocks: include_render_blocks?)
+          end)
 
         Logger.info(
           "[parser] build_sprite top_scripts done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t}"
@@ -468,14 +501,14 @@ defmodule ScratchInspector.Parser do
       end
 
     t = System.monotonic_time(:millisecond)
-    costumes = extract_costumes(target, zip_files)
+    costumes = if include_assets?, do: extract_costumes(target, zip_files), else: []
 
     Logger.info(
       "[parser] build_sprite costumes done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t} count=#{length(costumes)}"
     )
 
     t = System.monotonic_time(:millisecond)
-    sounds = extract_sounds(target, zip_files)
+    sounds = if include_assets?, do: extract_sounds(target, zip_files), else: []
 
     Logger.info(
       "[parser] build_sprite sounds done name=#{name} elapsed_ms=#{System.monotonic_time(:millisecond) - t} count=#{length(sounds)}"
@@ -501,10 +534,40 @@ defmodule ScratchInspector.Parser do
     result
   end
 
+  defp find_target_data(data, name, "stage") do
+    data
+    |> Map.get("targets", [])
+    |> Enum.find(&Map.get(&1, "isStage", false))
+    |> case do
+      nil -> {:error, "stage target not found"}
+      target -> {:ok, Map.put(target, "name", name || "Stage"), true}
+    end
+  end
+
+  defp find_target_data(data, name, _type) do
+    data
+    |> Map.get("targets", [])
+    |> Enum.find(fn target ->
+      not Map.get(target, "isStage", false) and Map.get(target, "name") == name
+    end)
+    |> case do
+      nil -> {:error, "sprite target not found: #{name}"}
+      target -> {:ok, target, false}
+    end
+  end
+
   defp build_render_stack(start_id, blocks), do: build_detail_stack(start_id, blocks)
 
+  defp render_stack(start_id, blocks, opts) do
+    if Keyword.get(opts, :include_render_blocks, true) do
+      build_render_stack(start_id, blocks)
+    else
+      []
+    end
+  end
+
   defp build_detail_stack(start_id, blocks),
-    do: build_detail_stack(start_id, blocks, MapSet.new())
+    do: with_detail_block_cache(fn -> build_detail_stack(start_id, blocks, MapSet.new()) end)
 
   defp build_detail_stack(nil, _blocks, _visited), do: []
 
@@ -516,7 +579,7 @@ defmodule ScratchInspector.Parser do
 
       case Map.get(blocks, start_id) do
         block when is_map(block) ->
-          current = build_detail_block(start_id, block, blocks)
+          current = build_detail_block(start_id, block, blocks, visited, :full_on_cache_hit)
           next_id = Map.get(block, "next")
           [current | build_detail_stack(next_id, blocks, visited)]
 
@@ -526,11 +589,26 @@ defmodule ScratchInspector.Parser do
     end
   end
 
-  defp build_render_block(id, block, blocks) do
-    build_detail_block(id, block, blocks)
+  defp build_detail_block(id, block, blocks, visited, cache_hit_mode \\ :reference_on_cache_hit) do
+    case detail_block_cache_get(id) do
+      {:hit, detail_block} ->
+        case cache_hit_mode do
+          :full_on_cache_hit -> detail_block
+          _ -> detail_block_reference_from_detail(detail_block)
+        end
+
+      :building ->
+        detail_block_reference(id, block)
+
+      :miss ->
+        detail_block_cache_mark_building(id)
+        detail_block = do_build_detail_block(id, block, blocks, visited)
+        detail_block_cache_put(id, detail_block)
+        detail_block
+    end
   end
 
-  defp build_detail_block(id, block, blocks) do
+  defp do_build_detail_block(id, block, blocks, visited) do
     opcode = Map.get(block, "opcode", "")
     inputs = Map.get(block, "inputs", %{})
     fields = Map.get(block, "fields", %{})
@@ -543,13 +621,129 @@ defmodule ScratchInspector.Parser do
       next: Map.get(block, "next"),
       mutation: Map.get(block, "mutation", %{}),
       fields: normalize_detail_fields(fields),
-      inputs: normalize_detail_inputs(inputs, blocks, opcode),
-      children: normalize_detail_children(inputs, blocks),
+      inputs: normalize_detail_inputs(inputs, blocks, opcode, visited),
+      children: normalize_detail_children(inputs, blocks, visited),
       label: render_block_label(block),
-      parts: render_block_parts(fields, inputs, blocks, opcode),
-      branches: render_block_branches(inputs, blocks)
+      parts: detail_block_parts(fields, inputs, blocks, opcode, visited),
+      branches: detail_block_branches(inputs, blocks, visited)
     }
   end
+
+  defp detail_block_parts(fields, inputs, blocks, opcode, visited) do
+    if compact_detail_payload?() do
+      []
+    else
+      render_block_parts(fields, inputs, blocks, opcode, visited)
+    end
+  end
+
+  defp detail_block_branches(inputs, blocks, visited) do
+    if compact_detail_payload?() do
+      []
+    else
+      render_block_branches(inputs, blocks, visited)
+    end
+  end
+
+  defp detail_block_reference(id, block) do
+    %{
+      id: id,
+      opcode: Map.get(block, "opcode", ""),
+      category: block_category(Map.get(block, "opcode", "")),
+      shape: block_shape(Map.get(block, "opcode", "")),
+      next: Map.get(block, "next"),
+      mutation: Map.get(block, "mutation", %{}),
+      fields: [],
+      inputs: [],
+      children: [],
+      label: render_block_label(block),
+      parts: [],
+      branches: [],
+      reference: true
+    }
+  end
+
+  defp detail_block_reference_from_detail(detail_block) do
+    %{
+      id: Map.get(detail_block, :id),
+      opcode: Map.get(detail_block, :opcode, ""),
+      category: Map.get(detail_block, :category),
+      shape: Map.get(detail_block, :shape),
+      next: Map.get(detail_block, :next),
+      mutation: Map.get(detail_block, :mutation, %{}),
+      fields: [],
+      inputs: [],
+      children: [],
+      label: Map.get(detail_block, :label),
+      parts: [],
+      branches: [],
+      reference: true
+    }
+  end
+
+  defp with_detail_block_cache(fun) do
+    key = detail_block_cache_key()
+
+    if is_map(Process.get(key)) do
+      fun.()
+    else
+      Process.put(key, %{})
+
+      try do
+        fun.()
+      after
+        Process.delete(key)
+      end
+    end
+  end
+
+  defp detail_block_cache_get(id) do
+    cache = Process.get(detail_block_cache_key(), %{})
+
+    case Map.get(cache, id) do
+      nil -> :miss
+      :building -> :building
+      detail_block -> {:hit, detail_block}
+    end
+  end
+
+  defp detail_block_cache_mark_building(id) do
+    Process.put(
+      detail_block_cache_key(),
+      Map.put(Process.get(detail_block_cache_key(), %{}), id, :building)
+    )
+  end
+
+  defp detail_block_cache_put(id, detail_block) do
+    Process.put(
+      detail_block_cache_key(),
+      Map.put(Process.get(detail_block_cache_key(), %{}), id, detail_block)
+    )
+  end
+
+  defp detail_block_cache_key, do: {__MODULE__, :detail_block_cache}
+
+  defp with_detail_payload_mode(mode, fun) do
+    key = detail_payload_mode_key()
+    previous = Process.get(key, :full)
+    Process.put(key, mode)
+
+    try do
+      fun.()
+    after
+      Process.put(key, previous)
+    end
+  end
+
+  defp compact_detail_payload? do
+    Process.get(detail_payload_mode_key(), :full) == :compact
+  end
+
+  defp compact_detail_depth_reached?(visited) do
+    compact_detail_payload?() and MapSet.size(visited) >= @compact_detail_inline_depth_limit
+  end
+
+  defp detail_payload_mode_key, do: {__MODULE__, :detail_payload_mode}
 
   defp normalize_detail_fields(fields) do
     fields
@@ -562,7 +756,7 @@ defmodule ScratchInspector.Parser do
     end)
   end
 
-  defp normalize_detail_inputs(inputs, blocks, parent_opcode) do
+  defp normalize_detail_inputs(inputs, blocks, parent_opcode, visited \\ MapSet.new()) do
     inputs
     |> Enum.reject(fn {key, _} ->
       String.starts_with?(key, "SUBSTACK") or key == "custom_block"
@@ -572,50 +766,67 @@ defmodule ScratchInspector.Parser do
       %{
         name: key,
         slot: input_slot_shape(key, value, blocks),
-        value: normalize_detail_input_value(value, blocks, parent_opcode, key)
+        value: normalize_detail_input_value(value, blocks, parent_opcode, key, visited)
       }
     end)
   end
 
-  defp normalize_detail_input_value([_, second], blocks, parent_opcode, input_name),
-    do: normalize_detail_input_atom(second, blocks, parent_opcode, input_name)
+  defp normalize_detail_input_value([_, second], blocks, parent_opcode, input_name, visited),
+    do: normalize_detail_input_atom(second, blocks, parent_opcode, input_name, visited)
 
-  defp normalize_detail_input_value([_, second, _fallback], blocks, parent_opcode, input_name),
-    do: normalize_detail_input_atom(second, blocks, parent_opcode, input_name)
+  defp normalize_detail_input_value(
+         [_, second, _fallback],
+         blocks,
+         parent_opcode,
+         input_name,
+         visited
+       ),
+       do: normalize_detail_input_atom(second, blocks, parent_opcode, input_name, visited)
 
-  defp normalize_detail_input_value(_, _blocks, _parent_opcode, _input_name), do: nil
+  defp normalize_detail_input_value(_, _blocks, _parent_opcode, _input_name, _visited), do: nil
 
-  defp normalize_detail_input_atom([type, value | _], _blocks, _parent_opcode, _input_name)
+  defp normalize_detail_input_atom(
+         [type, value | _],
+         _blocks,
+         _parent_opcode,
+         _input_name,
+         _visited
+       )
        when is_binary(value) or is_number(value) do
     %{kind: :literal, input_type: type, value: to_string(value)}
   end
 
-  defp normalize_detail_input_atom(id, blocks, parent_opcode, input_name) when is_binary(id) do
+  defp normalize_detail_input_atom(id, blocks, parent_opcode, input_name, visited)
+       when is_binary(id) do
     case Map.get(blocks, id) do
       block when is_map(block) ->
-        child_detail_block = build_detail_block(id, block, blocks)
+        if MapSet.member?(visited, id) or compact_detail_depth_reached?(visited) do
+          %{kind: :reference, id: id, label: render_block_label(block)}
+        else
+          child_detail_block = build_detail_block(id, block, blocks, MapSet.put(visited, id))
 
-        %{
-          kind: :block,
-          nested_logical: nested_logical_input?(parent_opcode, input_name, child_detail_block),
-          block: child_detail_block
-        }
+          %{
+            kind: :block,
+            nested_logical: nested_logical_input?(parent_opcode, input_name, child_detail_block),
+            block: child_detail_block
+          }
+        end
 
       _ ->
         %{kind: :literal, value: "?"}
     end
   end
 
-  defp normalize_detail_input_atom(_, _blocks, _parent_opcode, _input_name), do: nil
+  defp normalize_detail_input_atom(_, _blocks, _parent_opcode, _input_name, _visited), do: nil
 
-  defp normalize_detail_children(inputs, blocks) do
+  defp normalize_detail_children(inputs, blocks, visited \\ MapSet.new()) do
     inputs
     |> Enum.filter(fn {key, _} -> String.starts_with?(key, "SUBSTACK") end)
     |> Enum.sort_by(fn {key, _} -> key end)
     |> Enum.map(fn {key, value} ->
       %{
         name: key,
-        blocks: build_detail_stack(extract_input_id(value), blocks)
+        blocks: build_detail_stack(extract_input_id(value), blocks, visited)
       }
     end)
     |> Enum.reject(fn child -> Enum.empty?(child.blocks) end)
@@ -641,7 +852,7 @@ defmodule ScratchInspector.Parser do
     end
   end
 
-  defp render_block_parts(fields, inputs, blocks, parent_opcode) do
+  defp render_block_parts(fields, inputs, blocks, parent_opcode, visited) do
     field_parts =
       fields
       |> Enum.sort_by(fn {key, _} -> key end)
@@ -660,7 +871,7 @@ defmodule ScratchInspector.Parser do
         %{
           name: key,
           slot: input_slot_shape(key, value, blocks),
-          value: render_input_value(value, blocks, parent_opcode, key)
+          value: render_input_value(value, blocks, parent_opcode, key, visited)
         }
       end)
       |> Enum.reject(fn part -> is_nil(part.value) or part.value == "" end)
@@ -733,39 +944,43 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("FRONT_BACK", "back"), do: "最背面"
   defp normalize_field_value(_field_name, value), do: value
 
-  defp render_input_value([_, second], blocks, parent_opcode, input_name),
-    do: render_input_atom(second, blocks, parent_opcode, input_name)
+  defp render_input_value([_, second], blocks, parent_opcode, input_name, visited),
+    do: render_input_atom(second, blocks, parent_opcode, input_name, visited)
 
-  defp render_input_value([_, second, _fallback], blocks, parent_opcode, input_name),
-    do: render_input_atom(second, blocks, parent_opcode, input_name)
+  defp render_input_value([_, second, _fallback], blocks, parent_opcode, input_name, visited),
+    do: render_input_atom(second, blocks, parent_opcode, input_name, visited)
 
-  defp render_input_value(_, _blocks, _parent_opcode, _input_name), do: nil
+  defp render_input_value(_, _blocks, _parent_opcode, _input_name, _visited), do: nil
 
-  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name)
+  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name, _visited)
        when is_binary(value),
        do: value
 
-  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name)
+  defp render_input_atom([_type, value | _], _blocks, _parent_opcode, _input_name, _visited)
        when is_number(value),
        do: to_string(value)
 
-  defp render_input_atom(id, blocks, parent_opcode, input_name) when is_binary(id) do
+  defp render_input_atom(id, blocks, parent_opcode, input_name, visited) when is_binary(id) do
     case Map.get(blocks, id) do
       block when is_map(block) ->
-        child_render_block = build_render_block(id, block, blocks)
+        if MapSet.member?(visited, id) or compact_detail_depth_reached?(visited) do
+          %{kind: :reference, id: id, label: render_block_label(block)}
+        else
+          child_render_block = build_detail_block(id, block, blocks, MapSet.put(visited, id))
 
-        %{
-          kind: :block,
-          nested_logical: nested_logical_input?(parent_opcode, input_name, child_render_block),
-          block: child_render_block
-        }
+          %{
+            kind: :block,
+            nested_logical: nested_logical_input?(parent_opcode, input_name, child_render_block),
+            block: child_render_block
+          }
+        end
 
       _ ->
         "?"
     end
   end
 
-  defp render_input_atom(_, _blocks, _parent_opcode, _input_name), do: nil
+  defp render_input_atom(_, _blocks, _parent_opcode, _input_name, _visited), do: nil
 
   defp nested_logical_input?(parent_opcode, _input_name, child_block) when is_map(child_block) do
     logical_boolean_opcode?(parent_opcode) and
@@ -778,13 +993,13 @@ defmodule ScratchInspector.Parser do
     opcode in ["operator_and", "operator_or", "operator_not"]
   end
 
-  defp render_block_branches(inputs, blocks) do
+  defp render_block_branches(inputs, blocks, visited) do
     inputs
     |> Enum.filter(fn {key, _} -> String.starts_with?(key, "SUBSTACK") end)
     |> Enum.sort_by(fn {key, _} -> key end)
     |> Enum.map(fn {key, value} ->
       substack_id = extract_input_id(value)
-      %{name: key, blocks: build_render_stack(substack_id, blocks)}
+      %{name: key, blocks: build_detail_stack(substack_id, blocks, visited)}
     end)
     |> Enum.reject(fn branch -> Enum.empty?(branch.blocks) end)
   end
@@ -929,8 +1144,8 @@ defmodule ScratchInspector.Parser do
       inputs: normalize_detail_inputs(inputs, blocks, "procedures_definition"),
       children: normalize_detail_children(inputs, blocks),
       label: custom_procedure_display_label(mutation),
-      parts: render_block_parts(fields, inputs, blocks, "procedures_definition"),
-      branches: render_block_branches(inputs, blocks)
+      parts: detail_block_parts(fields, inputs, blocks, "procedures_definition", MapSet.new()),
+      branches: detail_block_branches(inputs, blocks, MapSet.new())
     }
   end
 
@@ -1218,7 +1433,7 @@ defmodule ScratchInspector.Parser do
 
   # ---- top-level scripts (non-function code) ----
 
-  defp extract_top_scripts(blocks) do
+  defp extract_top_scripts(blocks, opts \\ []) do
     # hat blocks (トップレベル) から関数定義以外のスクリプトを抽出
     blocks
     |> Enum.filter(fn {_id, block} ->
@@ -1260,7 +1475,7 @@ defmodule ScratchInspector.Parser do
         },
         detail_blocks: build_detail_stack(next_id, blocks),
         blocks: chain,
-        render_blocks: build_render_stack(next_id, blocks)
+        render_blocks: render_stack(next_id, blocks, opts)
       }
     end)
     |> Enum.sort_by(fn s -> s.hat_opcode end)
@@ -1344,7 +1559,7 @@ defmodule ScratchInspector.Parser do
 
   # ---- custom blocks ----
 
-  defp extract_custom_blocks(blocks) do
+  defp extract_custom_blocks(blocks, opts \\ []) do
     # procedure_definition ブロックを探す
     definitions =
       blocks
@@ -1360,7 +1575,7 @@ defmodule ScratchInspector.Parser do
         next_id = Map.get(block, "next")
         code_blocks = if next_id, do: walk_block_chain(next_id, blocks), else: []
 
-        render_blocks = build_render_stack(next_id, blocks)
+        render_blocks = render_stack(next_id, blocks, opts)
         detail_header = build_custom_block_detail_header(id, proto, next_id, blocks)
         detail_blocks = build_detail_stack(next_id, blocks)
 

@@ -5,6 +5,8 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
   @parse_timeout_ms 60_000
 
   def process(socket) do
+    cleanup_uploaded_archive(socket)
+
     parent = self()
     started_at = System.monotonic_time(:millisecond)
     upload_entries = socket.assigns.uploads.scratch_file.entries
@@ -26,7 +28,10 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
             {:ok, %{temp_path: temp_copy, ext: ext, name: entry.client_name}}
 
           {:error, reason} ->
-            Logger.error("[upload] temp copy error name=#{entry.client_name} reason=#{inspect(reason)}")
+            Logger.error(
+              "[upload] temp copy error name=#{entry.client_name} reason=#{inspect(reason)}"
+            )
+
             {:ok, {:copy_error, reason, entry.client_name}}
         end
       end)
@@ -74,12 +79,15 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
         Task.start(fn ->
           enrich_result =
             try do
-              ScratchInspector.Parser.enrich_project_costume_images_from_archive(project, temp_path, ext)
+              ScratchInspector.Parser.enrich_project_costume_images_from_archive(
+                project,
+                temp_path,
+                ext
+              )
             rescue
               e -> {:error, Exception.message(e)}
             end
 
-          _ = File.rm(temp_path)
           send(parent, {:costume_assets_enriched, enrich_result})
         end)
 
@@ -91,13 +99,10 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
         |> assign(:project, Map.put(project, :name, name))
         |> assign(:selected_sprite, if(project.stage, do: project.stage.name, else: nil))
         |> assign(:selected_target_type, if(project.stage, do: "stage", else: nil))
-        |> assign(
-          :deferred_target,
-          if(project.stage && Map.get(project.stage, :deferred_analysis, false),
-            do: %{name: project.stage.name, type: "stage"},
-            else: nil
-          )
-        )
+        |> assign(:uploaded_archive_path, temp_path)
+        |> assign(:uploaded_archive_ext, ext)
+        |> assign(:deferred_target, nil)
+        |> assign(:analysis_errors, %{})
         |> assign(:upload_error, nil)
         |> assign(:processing, false)
         |> assign(:expanded_variable_key, nil)
@@ -111,6 +116,15 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
         |> assign(:processing, false)
     end
   end
+
+  def cleanup_uploaded_archive(socket) do
+    socket.assigns
+    |> Map.get(:uploaded_archive_path)
+    |> cleanup_path()
+  end
+
+  defp cleanup_path(path) when is_binary(path), do: File.rm(path)
+  defp cleanup_path(_), do: :ok
 
   defp persistent_temp_path(ext) do
     Path.join(

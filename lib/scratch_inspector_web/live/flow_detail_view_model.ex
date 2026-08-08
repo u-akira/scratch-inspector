@@ -106,7 +106,7 @@ defmodule ScratchInspectorWeb.FlowDetailViewModel do
     hat_label = Map.get(flow_detail, :hat_label)
 
     Enum.find(scripts, fn script ->
-      (is_binary(hat_opcode) and script.hat_opcode == hat_opcode) and
+      is_binary(hat_opcode) and script.hat_opcode == hat_opcode and
         (is_binary(hat_label) and script.hat_label == hat_label)
     end)
   end

@@ -2,7 +2,9 @@ defmodule ScratchInspectorWeb.ErrorJSONTest do
   use ScratchInspectorWeb.ConnCase, async: true
 
   test "renders 404" do
-    assert ScratchInspectorWeb.ErrorJSON.render("404.json", %{}) == %{errors: %{detail: "Not Found"}}
+    assert ScratchInspectorWeb.ErrorJSON.render("404.json", %{}) == %{
+             errors: %{detail: "Not Found"}
+           }
   end
 
   test "renders 500" do

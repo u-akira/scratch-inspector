@@ -54,7 +54,11 @@ defmodule ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocksTest do
       fields: [],
       inputs: [
         %{name: "LEFT_SPEED", slot: :round, value: %{kind: :literal, input_type: 4, value: "80"}},
-        %{name: "RIGHT_SPEED", slot: :round, value: %{kind: :literal, input_type: 4, value: "-80"}},
+        %{
+          name: "RIGHT_SPEED",
+          slot: :round,
+          value: %{kind: :literal, input_type: 4, value: "-80"}
+        },
         %{name: "DURATION", slot: :round, value: %{kind: :literal, input_type: 4, value: "2"}}
       ],
       children: []

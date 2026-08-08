@@ -2,6 +2,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
   use ScratchInspectorWeb, :live_view
   require Logger
   alias ScratchInspectorWeb.FlowDetailViewModel
+  alias ScratchInspectorWeb.Live.DeferredTargetCompactor
   alias ScratchInspectorWeb.Live.InspectorComponents.Assets, as: AssetsComponents
   alias ScratchInspectorWeb.Live.InspectorComponents.ScratchBlocks, as: ScratchBlocksComponents
   alias ScratchInspectorWeb.Live.InspectorComponents.Variables, as: VariablesComponents
@@ -24,6 +25,9 @@ defmodule ScratchInspectorWeb.InspectorLive do
       |> assign(:flow_detail, nil)
       |> assign(:expanded_variable_key, nil)
       |> assign(:deferred_target, nil)
+      |> assign(:uploaded_archive_path, nil)
+      |> assign(:uploaded_archive_ext, nil)
+      |> assign(:analysis_errors, %{})
       |> allow_upload(:scratch_file,
         accept: :any,
         max_entries: 1,
@@ -43,13 +47,21 @@ defmodule ScratchInspectorWeb.InspectorLive do
   @impl true
   def handle_info({:upload_parse_finished, parse_result, name, temp_path}, socket) do
     Logger.info("[upload] handle_info received name=#{name} result=#{elem(parse_result, 0)}")
-    {:noreply, ScratchInspectorWeb.Live.InspectorUpload.finish(socket, parse_result, name, temp_path)}
+
+    {:noreply,
+     ScratchInspectorWeb.Live.InspectorUpload.finish(socket, parse_result, name, temp_path)}
   end
 
   @impl true
   def handle_info({:costume_assets_enriched, {:ok, enriched_project}}, socket) do
     Logger.info("[assets] async costume enrich finished")
-    {:noreply, assign(socket, :project, enriched_project)}
+
+    if socket.assigns.project do
+      {:noreply,
+       assign(socket, :project, merge_costume_assets(socket.assigns.project, enriched_project))}
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -64,15 +76,19 @@ defmodule ScratchInspectorWeb.InspectorLive do
 
     {:noreply,
      socket
-     |> assign(:processing, false)
      |> assign(:deferred_target, nil)
-     |> assign(:upload_error, "遅延解析に失敗しました: #{reason}")}
+     |> assign(
+       :analysis_errors,
+       Map.put(socket.assigns.analysis_errors || %{}, analysis_key(type, name), reason)
+     )}
   end
 
   @impl true
-  def handle_info({:deferred_enrich_finished, name, type, enriched}, socket) do
+  def handle_info({:deferred_enrich_finished, name, type, enriched}, socket)
+      when is_map(enriched) do
     Logger.info("[deferred] enrich finished name=#{name} type=#{type}")
     project = socket.assigns.project
+    enriched = DeferredTargetCompactor.compact(enriched, nil)
 
     updated_project =
       case type do
@@ -91,8 +107,17 @@ defmodule ScratchInspectorWeb.InspectorLive do
     {:noreply,
      socket
      |> assign(:project, updated_project)
-     |> assign(:processing, false)
-     |> assign(:deferred_target, nil)}
+     |> assign(:deferred_target, nil)
+     |> assign(
+       :analysis_errors,
+       Map.delete(socket.assigns.analysis_errors || %{}, analysis_key(type, name))
+     )}
+  end
+
+  @impl true
+  def terminate(_reason, socket) do
+    ScratchInspectorWeb.Live.InspectorUpload.cleanup_uploaded_archive(socket)
+    :ok
   end
 
   # ---- helpers ----
@@ -104,7 +129,98 @@ defmodule ScratchInspectorWeb.InspectorLive do
     end
   end
 
-  
+  defp merge_costume_assets(nil, enriched_project), do: enriched_project
+  defp merge_costume_assets(project, nil), do: project
+
+  defp merge_costume_assets(project, enriched_project) do
+    project
+    |> Map.put(:stage, merge_target_costumes(project.stage, enriched_project.stage))
+    |> Map.put(
+      :sprites,
+      merge_sprite_costumes(project.sprites || [], enriched_project.sprites || [])
+    )
+  end
+
+  defp merge_sprite_costumes(sprites, enriched_sprites) do
+    Enum.map(sprites, fn sprite ->
+      enriched = Enum.find(enriched_sprites, &(&1.name == sprite.name))
+      merge_target_costumes(sprite, enriched)
+    end)
+  end
+
+  defp merge_target_costumes(nil, _enriched), do: nil
+  defp merge_target_costumes(target, nil), do: target
+
+  defp merge_target_costumes(%{costumes: [], sounds: []} = target, enriched) do
+    if detailed_target?(target), do: target, else: do_merge_target_costumes(target, enriched)
+  end
+
+  defp merge_target_costumes(target, enriched), do: do_merge_target_costumes(target, enriched)
+
+  defp do_merge_target_costumes(target, enriched) do
+    enriched = enriched || %{}
+
+    target
+    |> Map.put(:costumes, Map.get(enriched, :costumes, Map.get(target, :costumes, [])))
+    |> Map.put(:sounds, Map.get(enriched, :sounds, Map.get(target, :sounds, [])))
+  end
+
+  defp analysis_error_for(_errors, nil), do: nil
+
+  defp analysis_error_for(errors, target) do
+    Map.get(errors || %{}, analysis_key(target_type(target), Map.get(target, :name)))
+  end
+
+  defp analysis_key(type, name), do: "#{type}:#{name}"
+
+  defp target_analyzing?(nil, _deferred_target), do: false
+  defp target_analyzing?(_target, nil), do: false
+
+  defp target_analyzing?(target, deferred_target) do
+    Map.get(target, :name) == Map.get(deferred_target, :name) and
+      target_type(target) == Map.get(deferred_target, :type)
+  end
+
+  attr :target, :map, required: true
+  attr :deferred_target, :map, default: nil
+
+  defp target_status_badge(assigns) do
+    assigns =
+      assign(assigns, :status, target_status(assigns.target, assigns.deferred_target))
+
+    ~H"""
+    <%= case @status do %>
+      <% :analyzing -> %>
+        <span class="absolute -right-1 -top-1 rounded bg-amber-500 px-1 text-[9px] font-semibold text-white shadow-sm">
+          解析中
+        </span>
+      <% :light -> %>
+        <span class="absolute -right-1 -top-1 rounded bg-slate-500 px-1 text-[9px] font-semibold text-white shadow-sm">
+          軽量
+        </span>
+      <% :full -> %>
+        <span class="absolute -right-1 -top-1 rounded bg-emerald-500 px-1 text-[9px] font-semibold text-white shadow-sm">
+          詳細
+        </span>
+      <% _ -> %>
+    <% end %>
+    """
+  end
+
+  defp target_status(target, deferred_target) do
+    cond do
+      target_analyzing?(target, deferred_target) -> :analyzing
+      Map.get(target, :deferred_analysis, false) -> :light
+      detailed_target?(target) -> :full
+      true -> nil
+    end
+  end
+
+  defp detailed_target?(target) do
+    not Map.get(target, :deferred_analysis, false) and
+      (Enum.any?(Map.get(target, :custom_blocks, []) || []) or
+         Enum.any?(Map.get(target, :top_scripts, []) || []))
+  end
 
   # ---- render ----
 
@@ -119,7 +235,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
             <span class="text-2xl">🐱</span>
             <h1 class="text-xl font-bold text-white tracking-tight">Scratch Inspector</h1>
           </div>
-          
+
           <%= if @project do %>
             <div class="flex items-center gap-3">
               <span class="text-sm text-white/80 font-medium">{@project.name}</span>
@@ -151,40 +267,40 @@ defmodule ScratchInspectorWeb.InspectorLive do
               >
                 <%= if @processing do %>
                   <div class="text-5xl mb-4 animate-spin inline-block">⚙️</div>
-                  
+
                   <p class="text-base font-semibold text-[#4C97FF]">解析中...</p>
                 <% else %>
                   <div class="text-5xl mb-4">🗂️</div>
-                  
+
                   <p class="text-lg font-semibold text-gray-700 mb-1">
                     Scratch ファイルをドロップ
                   </p>
-                  
+
                   <p class="text-sm text-gray-400 mb-6">.sb / .sb2 / .sb3 に対応</p>
-                  
+
                   <label class="cursor-pointer inline-block bg-[#4C97FF] hover:bg-[#3d87ef] text-white font-medium px-6 py-2.5 rounded-full transition">
                     ファイルを選択 <.live_file_input upload={@uploads.scratch_file} class="sr-only" />
                   </label>
-                  
+
                   <%= for entry <- @uploads.scratch_file.entries do %>
                     <div class="mt-4 text-sm text-gray-600 flex items-center justify-center gap-2">
                       <span>📄</span> <span>{entry.client_name}</span>
                     </div>
-                    
+
                     <div class="mt-2 w-full bg-gray-200 rounded-full h-2">
                       <div
                         class="bg-[#4C97FF] h-2 rounded-full transition-all duration-300"
                         style={"width: #{entry.progress}%"}
                       />
                     </div>
-                    
+
                     <%= if entry.done? do %>
                       <p class="mt-1 text-xs text-green-500">アップロード完了</p>
                     <% else %>
                       <p class="mt-1 text-xs text-gray-400">アップロード中... {entry.progress}%</p>
                     <% end %>
                   <% end %>
-                  
+
                   <%= if Enum.any?(@uploads.scratch_file.entries, & &1.done?) do %>
                     <div class="mt-4">
                       <button
@@ -197,13 +313,15 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   <% end %>
                 <% end %>
               </div>
-              
+
               <%= if @upload_error do %>
                 <p class="mt-3 text-sm text-red-500 text-center">{@upload_error}</p>
               <% end %>
-              
+
               <%= for err <- upload_errors(@uploads.scratch_file) do %>
-                <p class="mt-3 text-sm text-red-500 text-center">{InspectorUI.upload_error_text(err)}</p>
+                <p class="mt-3 text-sm text-red-500 text-center">
+                  {InspectorUI.upload_error_text(err)}
+                </p>
               <% end %>
             </form>
           </div>
@@ -219,7 +337,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
             </div>
           <% end %>
 
-          <!-- Sprite thumbnail strip -->
+    <!-- Sprite thumbnail strip -->
           <div class="bg-white border-b border-gray-200 flex gap-1 px-3 py-2 overflow-x-auto flex-shrink-0">
             <%= if @project.stage do %>
               <button
@@ -234,11 +352,14 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   )
                 ]}
               >
-                <AssetsComponents.sprite_thumbnail sprite={@project.stage} />
+                <div class="relative">
+                  <AssetsComponents.sprite_thumbnail sprite={@project.stage} />
+                  <.target_status_badge target={@project.stage} deferred_target={@deferred_target} />
+                </div>
                 <span class="text-[10px] text-gray-600 truncate max-w-[48px]">背景</span>
               </button>
             <% end %>
-            
+
             <%= for sprite <- @project.sprites do %>
               <button
                 phx-click="select_sprite"
@@ -252,7 +373,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   )
                 ]}
               >
-                <AssetsComponents.sprite_thumbnail sprite={sprite} />
+                <div class="relative">
+                  <AssetsComponents.sprite_thumbnail sprite={sprite} />
+                  <.target_status_badge target={sprite} deferred_target={@deferred_target} />
+                </div>
                 <span class="text-[10px] text-gray-600 truncate max-w-[48px]">{sprite.name}</span>
               </button>
             <% end %>
@@ -291,6 +415,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   target={target}
                   flow_detail={@flow_detail}
                   deferred_target={@deferred_target}
+                  analysis_error={analysis_error_for(@analysis_errors, target)}
+                  analysis_busy?={not is_nil(@deferred_target)}
                 />
               <% :variables -> %>
                 <VariablesComponents.variables_panel
@@ -319,6 +445,8 @@ defmodule ScratchInspectorWeb.InspectorLive do
   attr :target, :map, default: nil
   attr :flow_detail, :map, default: nil
   attr :deferred_target, :map, default: nil
+  attr :analysis_error, :string, default: nil
+  attr :analysis_busy?, :boolean, default: false
 
   defp flow_graph_panel(assigns) do
     detail = FlowDetailViewModel.build(assigns.project, assigns.target, assigns.flow_detail)
@@ -342,6 +470,42 @@ defmodule ScratchInspectorWeb.InspectorLive do
     ~H"""
     <div>
       <%= if @target do %>
+        <%= if Map.get(@target, :deferred_analysis, false) do %>
+          <div class="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="font-semibold text-slate-800">イベントの入口だけを表示しています</p>
+                <p class="mt-0.5 text-slate-500">カスタムブロックやメッセージ連携は、詳細解析後に表示されます。</p>
+                <%= if @analysis_error do %>
+                  <p class="mt-1 text-red-600">{@analysis_error}</p>
+                <% end %>
+              </div>
+              <button
+                type="button"
+                phx-click="analyze_deferred_target"
+                phx-value-name={@target.name}
+                phx-value-type={target_type(@target)}
+                disabled={@analysis_busy?}
+                class={[
+                  "inline-flex h-8 items-center rounded-md px-3 text-xs font-semibold transition",
+                  if(@analysis_busy?,
+                    do: "cursor-not-allowed bg-slate-200 text-slate-400",
+                    else: "bg-[#4C97FF] text-white hover:bg-[#3d87ef]"
+                  )
+                ]}
+              >
+                {if @target_loading?, do: "詳細解析中...", else: "詳細フローを解析"}
+              </button>
+            </div>
+          </div>
+        <% else %>
+          <div class="mb-3 flex justify-end">
+            <span class="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+              詳細解析済み
+            </span>
+          </div>
+        <% end %>
+
         <%= if @target_loading? do %>
           <div class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-center gap-2">
             <span class="inline-block h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
@@ -356,17 +520,17 @@ defmodule ScratchInspectorWeb.InspectorLive do
               message="Flow is still being analyzed for this target."
             />
           <% else %>
-          <AssetsComponents.empty_state
-            icon=""
-            message="このスプライトにはスクリプトがありません"
-          />
+            <AssetsComponents.empty_state
+              icon=""
+              message="このスプライトにはスクリプトがありません"
+            />
           <% end %>
         <% else %>
           <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <div class="mb-3 flex items-center justify-end gap-3">
               <span class="text-xs text-gray-400">{AssetsComponents.display_name(@target)}</span>
             </div>
-            
+
             <div
               id={"flow-chart-#{flow_dom_id(@target)}"}
               phx-hook="MermaidChart"
@@ -384,7 +548,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   >
                     -
                   </button>
-                  
+
                   <button
                     type="button"
                     data-zoom-action="in"
@@ -393,7 +557,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                   >
                     +
                   </button>
-                  
+
                   <button
                     type="button"
                     data-zoom-action="reset"
@@ -402,9 +566,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
                     100%
                   </button>
                 </div>
-                 <span data-zoom-label class="text-xs font-medium text-slate-500">100%</span>
+                <span data-zoom-label class="text-xs font-medium text-slate-500">100%</span>
               </div>
-               <div data-role="viewport" class="relative min-h-[360px] overflow-auto px-2 py-4">
+
+              <div data-role="viewport" class="relative min-h-[360px] overflow-auto px-2 py-4">
                 <%= if @flow_detail do %>
                   <div
                     data-role="flow-inline-detail"
@@ -423,12 +588,12 @@ defmodule ScratchInspectorWeb.InspectorLive do
                         ✕
                       </button>
                     </div>
+
                     <div class="scratch-flow-detail-body">
                       <%= if @detail_script do %>
                         <%= if detail_blocks_present?(@detail_script) do %>
                           <ScratchBlocksComponents.scratch_script_detail detail={@detail_script} />
                         <% else %>
-                          <p class="text-xs text-gray-400 italic">ブロックなし</p>
                           <p class="text-xs text-gray-400 italic">ブロックなし</p>
                         <% end %>
                       <% else %>
@@ -444,7 +609,9 @@ defmodule ScratchInspectorWeb.InspectorLive do
                                 class="flex items-center gap-3 w-full bg-white rounded-lg border border-gray-200 px-3 py-2 hover:bg-blue-50 hover:border-blue-200 transition text-left"
                               >
                                 <AssetsComponents.sprite_thumbnail sprite={receiver.target} />
-                                <span class="text-xs font-medium text-gray-700">{AssetsComponents.display_name(receiver.target)}</span>
+                                <span class="text-xs font-medium text-gray-700">
+                                  {AssetsComponents.display_name(receiver.target)}
+                                </span>
                                 <span class="text-xs text-gray-400">-></span>
                                 <span class="text-xs text-gray-600">{receiver.script.hat_label}</span>
                               </button>
@@ -457,11 +624,11 @@ defmodule ScratchInspectorWeb.InspectorLive do
                     </div>
                   </div>
                 <% end %>
-               </div>
+              </div>
             </div>
           </div>
         <% end %>
-        
+
         <%= if false do %>
           <div class="relative border border-gray-200 rounded-xl overflow-hidden bg-white">
             <div class="absolute right-3 top-3 z-10">
@@ -476,7 +643,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
                 ✕
               </button>
             </div>
-            
+
             <div class="p-4 bg-gray-50">
               <%= if @detail_script do %>
                 <%= if detail_blocks_present?(@detail_script) do %>
@@ -497,7 +664,9 @@ defmodule ScratchInspectorWeb.InspectorLive do
                         class="flex items-center gap-3 w-full bg-white rounded-lg border border-gray-200 px-3 py-2 hover:bg-blue-50 hover:border-blue-200 transition text-left"
                       >
                         <AssetsComponents.sprite_thumbnail sprite={receiver.target} />
-                        <span class="text-xs font-medium text-gray-700">{AssetsComponents.display_name(receiver.target)}</span>
+                        <span class="text-xs font-medium text-gray-700">
+                          {AssetsComponents.display_name(receiver.target)}
+                        </span>
                         <span class="text-xs text-gray-400">-></span>
                         <span class="text-xs text-gray-600">{receiver.script.hat_label}</span>
                       </button>
@@ -519,8 +688,6 @@ defmodule ScratchInspectorWeb.InspectorLive do
     </div>
     """
   end
-
-  
 
   defp flow_dom_id(target) do
     target

@@ -60,6 +60,7 @@ defmodule ScratchInspectorWeb.Live.InspectorFlowTest do
     assert mermaid =~ "green-flag.svg"
     assert mermaid =~ "が押されたとき</span>"
   end
+
   test "selected detail does not change the mermaid chart definition" do
     target = %{
       name: "Sprite1",

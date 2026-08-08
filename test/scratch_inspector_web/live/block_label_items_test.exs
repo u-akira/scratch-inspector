@@ -61,6 +61,7 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItemsTest do
              %{kind: :label, value: " にする"}
            ]
   end
+
   test "keeps placeholder order for looks effect label/value combinations" do
     label = "[EFFECT] の効果を [VALUE] にする"
 
@@ -76,7 +77,12 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItemsTest do
       assert BlockLabelItems.parse(label, fields, inputs) == [
                %{kind: :field, name: "EFFECT", value: effect},
                %{kind: :label, value: " の効果を "},
-               %{kind: :input, name: "VALUE", slot: :round, value: %{kind: :literal, value: value}},
+               %{
+                 kind: :input,
+                 name: "VALUE",
+                 slot: :round,
+                 value: %{kind: :literal, value: value}
+               },
                %{kind: :label, value: " にする"}
              ]
     end
@@ -93,16 +99,25 @@ defmodule ScratchInspectorWeb.Live.BlockLabelItemsTest do
     ]
 
     assert BlockLabelItems.parse(label, fields, inputs) == [
-             %{kind: :input, name: "OPERAND1", slot: :round, value: %{kind: :literal, value: "x"}},
+             %{
+               kind: :input,
+               name: "OPERAND1",
+               slot: :round,
+               value: %{kind: :literal, value: "x"}
+             },
              %{kind: :label, value: " = "},
              %{kind: :input, name: "OPERAND2", slot: :round, value: %{kind: :literal, value: "1"}}
            ]
   end
 
   test "resolves toio direction menu field aliases" do
-    assert BlockLabelItems.parse("[DIRECTION]に速さ[SPEED]で[DURATION]秒動かす", [
-             %{name: "moveDirections", value: "前"}
-           ], []) == [
+    assert BlockLabelItems.parse(
+             "[DIRECTION]に速さ[SPEED]で[DURATION]秒動かす",
+             [
+               %{name: "moveDirections", value: "前"}
+             ],
+             []
+           ) == [
              %{kind: :field, name: "DIRECTION", value: "前"},
              %{kind: :label, value: "に速さ"},
              %{kind: :label, value: "[SPEED]"},

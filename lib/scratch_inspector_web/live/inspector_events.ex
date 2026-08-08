@@ -1,4 +1,5 @@
 defmodule ScratchInspectorWeb.Live.InspectorEvents do
+  alias ScratchInspectorWeb.Live.DeferredTargetCompactor
   alias ScratchInspectorWeb.Live.InspectorUpload
   require Logger
   @deferred_enrich_timeout_ms 20_000
@@ -10,16 +11,66 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
   def handle("upload", _params, socket), do: InspectorUpload.process(socket)
 
   def handle("select_sprite", %{"name" => name, "type" => type}, socket) do
-    socket = maybe_enrich_deferred_target_async(socket, name, type)
-
     {:noreply,
      socket
      |> Phoenix.Component.assign(:selected_sprite, name)
      |> Phoenix.Component.assign(:selected_target_type, type)
-     |> Phoenix.Component.assign(:deferred_target, deferred_target(socket.assigns.project, name, type))
      |> Phoenix.Component.assign(:show_sprite_code, false)
      |> Phoenix.Component.assign(:flow_detail, nil)
      |> Phoenix.Component.assign(:expanded_variable_key, nil)}
+  end
+
+  def handle("analyze_deferred_target", %{"name" => name, "type" => type}, socket) do
+    cond do
+      not is_nil(socket.assigns.deferred_target) ->
+        {:noreply, socket}
+
+      not is_binary(socket.assigns.uploaded_archive_path) ->
+        {:noreply,
+         Phoenix.Component.assign(
+           socket,
+           :analysis_errors,
+           put_analysis_error(
+             socket.assigns.analysis_errors,
+             type,
+             name,
+             "Uploaded archive is no longer available."
+           )
+         )}
+
+      true ->
+        case find_target(socket.assigns.project, name, type) do
+          %{deferred_analysis: true} ->
+            parent = self()
+            path = socket.assigns.uploaded_archive_path
+            ext = socket.assigns.uploaded_archive_ext
+
+            Logger.info(
+              "[deferred] enriching target from archive start name=#{name} type=#{type}"
+            )
+
+            Task.start(fn ->
+              enriched = run_deferred_enrich_with_timeout(path, ext, name, type)
+
+              send(
+                parent,
+                {:deferred_enrich_finished, name, type, compact_enrich_result(enriched)}
+              )
+            end)
+
+            {:noreply,
+             socket
+             |> Phoenix.Component.assign(:deferred_target, %{name: name, type: type})
+             |> Phoenix.Component.assign(
+               :analysis_errors,
+               clear_analysis_error(socket.assigns.analysis_errors, type, name)
+             )
+             |> Phoenix.Component.assign(:upload_error, nil)}
+
+          _ ->
+            {:noreply, socket}
+        end
+    end
   end
 
   def handle("select_tab", %{"tab" => tab}, socket) do
@@ -27,7 +78,8 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
   end
 
   def handle("toggle_sprite_code", _params, socket) do
-    {:noreply, Phoenix.Component.assign(socket, :show_sprite_code, !socket.assigns.show_sprite_code)}
+    {:noreply,
+     Phoenix.Component.assign(socket, :show_sprite_code, !socket.assigns.show_sprite_code)}
   end
 
   def handle("flow_select_detail", %{"kind" => kind, "id" => id} = params, socket) do
@@ -46,7 +98,10 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
       end
 
     current = normalize_flow_detail(socket.assigns.flow_detail)
-    next_detail = normalize_flow_detail(%{kind: kind, id: id, sprite: target_sprite, type: target_type})
+
+    next_detail =
+      normalize_flow_detail(%{kind: kind, id: id, sprite: target_sprite, type: target_type})
+
     next = if flow_detail_same?(current, next_detail), do: nil, else: next_detail
 
     {:noreply, Phoenix.Component.assign(socket, :flow_detail, next)}
@@ -75,6 +130,8 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
   end
 
   def handle("reset", _params, socket) do
+    InspectorUpload.cleanup_uploaded_archive(socket)
+
     {:noreply,
      socket
      |> Phoenix.Component.assign(:project, nil)
@@ -84,6 +141,9 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
      |> Phoenix.Component.assign(:active_tab, :flow)
      |> Phoenix.Component.assign(:processing, false)
      |> Phoenix.Component.assign(:deferred_target, nil)
+     |> Phoenix.Component.assign(:uploaded_archive_path, nil)
+     |> Phoenix.Component.assign(:uploaded_archive_ext, nil)
+     |> Phoenix.Component.assign(:analysis_errors, %{})
      |> Phoenix.Component.assign(:show_sprite_code, false)
      |> Phoenix.Component.assign(:flow_detail, nil)
      |> Phoenix.Component.assign(:expanded_variable_key, nil)}
@@ -125,33 +185,6 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
   defp normalize_flow_detail_part(value) when is_float(value), do: Float.to_string(value)
   defp normalize_flow_detail_part(_), do: nil
 
-  defp maybe_enrich_deferred_target_async(socket, name, type) do
-    project = socket.assigns.project
-
-    if is_nil(project) do
-      socket
-    else
-      case find_target(project, name, type) do
-        %{deferred_analysis: true} = target ->
-          parent = self()
-          Logger.info("[deferred] enriching target async start name=#{name} type=#{type}")
-
-          Task.start(fn ->
-            enriched = run_deferred_enrich_with_timeout(target, name, type)
-
-            send(parent, {:deferred_enrich_finished, name, type, enriched})
-          end)
-
-          socket
-          |> Phoenix.Component.assign(:processing, true)
-          |> Phoenix.Component.assign(:upload_error, nil)
-
-        _ ->
-          socket
-      end
-    end
-  end
-
   defp find_target(project, name, "stage") do
     if project.stage && project.stage.name == name, do: project.stage, else: nil
   end
@@ -160,20 +193,11 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
     Enum.find(project.sprites, &(&1.name == name))
   end
 
-  defp deferred_target(nil, _name, _type), do: nil
-
-  defp deferred_target(project, name, type) do
-    case find_target(project, name, type) do
-      %{deferred_analysis: true} -> %{name: name, type: type}
-      _ -> nil
-    end
-  end
-
-  defp run_deferred_enrich_with_timeout(target, name, type) do
+  defp run_deferred_enrich_with_timeout(path, ext, name, type) do
     task =
       Task.async(fn ->
         try do
-          ScratchInspector.Parser.enrich_deferred_sprite(target)
+          ScratchInspector.Parser.enrich_target_from_archive(path, ext, name, type)
         rescue
           e ->
             {:error, Exception.message(e)}
@@ -184,7 +208,7 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
       {:ok, {:error, _} = err} ->
         err
 
-      {:ok, enriched} ->
+      {:ok, {:ok, enriched}} ->
         Logger.info("[deferred] enrich full success name=#{name} type=#{type}")
         enriched
 
@@ -193,7 +217,22 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
           "[deferred] enrich timeout fallback name=#{name} type=#{type} timeout_ms=#{@deferred_enrich_timeout_ms}"
         )
 
-        ScratchInspector.Parser.enrich_deferred_sprite_fallback(target)
+        {:error, "Detailed analysis timed out. Lightweight flow is still available."}
     end
   end
+
+  defp compact_enrich_result({:error, _reason} = error), do: error
+
+  defp compact_enrich_result(enriched) when is_map(enriched),
+    do: DeferredTargetCompactor.compact_for_message(enriched)
+
+  defp put_analysis_error(errors, type, name, message) do
+    Map.put(errors || %{}, analysis_key(type, name), message)
+  end
+
+  defp clear_analysis_error(errors, type, name) do
+    Map.delete(errors || %{}, analysis_key(type, name))
+  end
+
+  defp analysis_key(type, name), do: "#{type}:#{name}"
 end
