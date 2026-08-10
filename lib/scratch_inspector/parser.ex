@@ -4,6 +4,9 @@ defmodule ScratchInspector.Parser do
   @sound_inline_limit_bytes 1_500_000
   @heavy_sprite_block_threshold 3_000
   @compact_detail_inline_depth_limit 4
+  @compact_reference_text_depth 3
+  @compact_reference_text_max_length 120
+  @label_placeholder ~r/\[([A-Z0-9_]+)\]/
   @moduledoc """
   Scratch プロジェクトファイルのパーサー。
   .sb3 / .sb2 は ZIP 内の project.json を解析。
@@ -104,7 +107,7 @@ defmodule ScratchInspector.Parser do
   defp opcode_label("sensing_mousedown"), do: "マウスが押された"
   defp opcode_label("sensing_mousex"), do: "マウスのx座標"
   defp opcode_label("sensing_mousey"), do: "マウスのy座標"
-  defp opcode_label("sensing_setdragmode"), do: "ドラッグモードを [DRAG_MODE] にする"
+  defp opcode_label("sensing_setdragmode"), do: "ドラッグ [DRAG_MODE] ようにする"
   defp opcode_label("sensing_loudness"), do: "音量"
   defp opcode_label("sensing_timer"), do: "タイマー"
   defp opcode_label("sensing_resettimer"), do: "タイマーをリセット"
@@ -801,7 +804,7 @@ defmodule ScratchInspector.Parser do
     case Map.get(blocks, id) do
       block when is_map(block) ->
         if MapSet.member?(visited, id) or compact_detail_depth_reached?(visited) do
-          %{kind: :reference, id: id, label: render_block_label(block)}
+          %{kind: :reference, id: id, label: compact_reference_label(block, blocks, visited)}
         else
           child_detail_block = build_detail_block(id, block, blocks, MapSet.put(visited, id))
 
@@ -851,6 +854,92 @@ defmodule ScratchInspector.Parser do
         opcode_label(opcode)
     end
   end
+
+  defp compact_reference_label(block, blocks, visited) do
+    block
+    |> compact_expression_text(blocks, visited, @compact_reference_text_depth)
+    |> truncate_compact_reference()
+  end
+
+  defp compact_expression_text(block, _blocks, _visited, depth)
+       when not is_map(block) or depth <= 0 do
+    render_block_label(block || %{})
+  end
+
+  defp compact_expression_text(block, blocks, visited, depth) do
+    label = render_block_label(block)
+    fields = Map.get(block, "fields", %{})
+    inputs = Map.get(block, "inputs", %{})
+
+    Regex.replace(@label_placeholder, label, fn full, name ->
+      compact_placeholder_text(name, fields, inputs, blocks, visited, depth) || full
+    end)
+  end
+
+  defp compact_placeholder_text(name, fields, inputs, blocks, visited, depth) do
+    compact_field_text(name, fields) ||
+      compact_input_text(Map.get(inputs, name), blocks, visited, depth)
+  end
+
+  defp compact_field_text(name, fields) do
+    [name | compact_placeholder_aliases(name)]
+    |> Enum.find_value(fn key ->
+      case Map.get(fields, key) do
+        nil -> nil
+        value -> render_field_value(key, value)
+      end
+    end)
+  end
+
+  defp compact_placeholder_aliases("BTN"), do: ["buttons"]
+
+  defp compact_placeholder_aliases("DIRECTION"),
+    do: ["tiltDirectionAny", "moveDirections", "rotateDirections"]
+
+  defp compact_placeholder_aliases(_name), do: []
+
+  defp compact_input_text([_, second], blocks, visited, depth),
+    do: compact_input_atom_text(second, blocks, visited, depth)
+
+  defp compact_input_text([_, second, _fallback], blocks, visited, depth),
+    do: compact_input_atom_text(second, blocks, visited, depth)
+
+  defp compact_input_text(_, _blocks, _visited, _depth), do: nil
+
+  defp compact_input_atom_text([_type, value | _], _blocks, _visited, _depth)
+       when is_binary(value) or is_number(value),
+       do: to_string(value)
+
+  defp compact_input_atom_text(id, blocks, visited, depth) when is_binary(id) do
+    case Map.get(blocks, id) do
+      block when is_map(block) ->
+        cond do
+          MapSet.member?(visited, id) ->
+            render_block_label(block)
+
+          depth <= 0 ->
+            render_block_label(block)
+
+          true ->
+            compact_expression_text(block, blocks, MapSet.put(visited, id), depth - 1)
+        end
+
+      _ ->
+        "?"
+    end
+  end
+
+  defp compact_input_atom_text(_, _blocks, _visited, _depth), do: nil
+
+  defp truncate_compact_reference(text) when is_binary(text) do
+    if String.length(text) > @compact_reference_text_max_length do
+      String.slice(text, 0, @compact_reference_text_max_length) <> "..."
+    else
+      text
+    end
+  end
+
+  defp truncate_compact_reference(text), do: text
 
   defp render_block_parts(fields, inputs, blocks, parent_opcode, visited) do
     field_parts =
@@ -903,8 +992,8 @@ defmodule ScratchInspector.Parser do
   defp normalize_field_value("EFFECT", "brightness"), do: "明るさ"
   defp normalize_field_value("NUMBER_NAME", "number"), do: "番号"
   defp normalize_field_value("NUMBER_NAME", "name"), do: "名前"
-  defp normalize_field_value("DRAG_MODE", "draggable"), do: "ドラッグできる"
-  defp normalize_field_value("DRAG_MODE", "not draggable"), do: "ドラッグできない"
+  defp normalize_field_value("DRAG_MODE", "draggable"), do: "できる"
+  defp normalize_field_value("DRAG_MODE", "not draggable"), do: "できない"
   defp normalize_field_value("PROPERTY", "x position"), do: "x座標"
   defp normalize_field_value("PROPERTY", "y position"), do: "y座標"
   defp normalize_field_value("PROPERTY", "direction"), do: "向き"
@@ -964,7 +1053,7 @@ defmodule ScratchInspector.Parser do
     case Map.get(blocks, id) do
       block when is_map(block) ->
         if MapSet.member?(visited, id) or compact_detail_depth_reached?(visited) do
-          %{kind: :reference, id: id, label: render_block_label(block)}
+          %{kind: :reference, id: id, label: compact_reference_label(block, blocks, visited)}
         else
           child_render_block = build_detail_block(id, block, blocks, MapSet.put(visited, id))
 
@@ -1063,6 +1152,9 @@ defmodule ScratchInspector.Parser do
       opcode == "control_stop" ->
         :cap
 
+      command_opcode?(opcode) ->
+        :stack
+
       # Boolean reporters (hexagon shape)
       boolean_reporter_opcode?(opcode) ->
         :reporter_boolean
@@ -1091,20 +1183,29 @@ defmodule ScratchInspector.Parser do
   end
 
   defp round_reporter_opcode?(opcode) do
-    String.starts_with?(opcode, "operator_") or
-      String.starts_with?(opcode, "sensing_") or
+    not command_opcode?(opcode) and
+      (String.starts_with?(opcode, "operator_") or
+         String.starts_with?(opcode, "sensing_") or
+         opcode in [
+           "data_variable",
+           "data_listcontents",
+           "argument_reporter_string_number",
+           "motion_xposition",
+           "motion_yposition",
+           "motion_direction",
+           "looks_costumenumbername",
+           "looks_backdropnumbername",
+           "looks_size",
+           "sound_volume",
+           "microbit_getTiltAngle"
+         ])
+  end
+
+  defp command_opcode?(opcode) do
       opcode in [
-        "data_variable",
-        "data_listcontents",
-        "argument_reporter_string_number",
-        "motion_xposition",
-        "motion_yposition",
-        "motion_direction",
-        "looks_costumenumbername",
-        "looks_backdropnumbername",
-        "looks_size",
-        "sound_volume",
-        "microbit_getTiltAngle"
+        "sensing_askandwait",
+        "sensing_resettimer",
+        "sensing_setdragmode"
       ]
   end
 

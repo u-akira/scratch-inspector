@@ -460,7 +460,9 @@ defmodule ScratchInspector.ParserDetailBlocksTest do
 
     assert Enum.find(effect_block.fields, &(&1.name == "EFFECT")).value == "幽霊"
     assert Enum.find(costume_name_block.fields, &(&1.name == "NUMBER_NAME")).value == "名前"
-    assert Enum.find(drag_block.fields, &(&1.name == "DRAG_MODE")).value == "ドラッグできる"
+    assert drag_block.shape == :stack
+    assert drag_block.label == "ドラッグ [DRAG_MODE] ようにする"
+    assert Enum.find(drag_block.fields, &(&1.name == "DRAG_MODE")).value == "できる"
 
     backdrop_input = Enum.find(switch_bg_block.inputs, &(&1.name == "BACKDROP"))
 
@@ -613,6 +615,75 @@ defmodule ScratchInspector.ParserDetailBlocksTest do
     assert sound.base64 == Base.encode64(sound_binary)
   end
 
+  test "deferred target references include shallow expression text" do
+    project_path =
+      write_sb3(%{
+        "targets" => [
+          %{
+            "isStage" => true,
+            "name" => "Stage",
+            "variables" => %{},
+            "lists" => %{},
+            "broadcasts" => %{},
+            "blocks" => %{},
+            "comments" => %{},
+            "costumes" => [],
+            "sounds" => []
+          },
+          %{
+            "isStage" => false,
+            "name" => "Sprite1",
+            "variables" => %{
+              "var-x" => ["x", 0],
+              "var-big-x" => ["X", 0],
+              "var-result" => ["result", 0]
+            },
+            "lists" => %{},
+            "broadcasts" => %{},
+            "blocks" => %{
+              "hat" => %{
+                "opcode" => "event_whenflagclicked",
+                "next" => "set-result",
+                "parent" => nil,
+                "inputs" => %{},
+                "fields" => %{},
+                "shadow" => false,
+                "topLevel" => true
+              },
+              "set-result" => %{
+                "opcode" => "data_setvariableto",
+                "next" => nil,
+                "parent" => "hat",
+                "inputs" => %{"VALUE" => [1, "outer-1"]},
+                "fields" => %{"VARIABLE" => ["result", "var-result"]},
+                "shadow" => false,
+                "topLevel" => false
+              },
+              "outer-1" => operator_subtract_block("outer-2", [4, 1], "set-result"),
+              "outer-2" => operator_subtract_block("outer-3", [4, 2], "outer-1"),
+              "outer-3" => operator_subtract_block("inner-subtract", [4, 3], "outer-2"),
+              "inner-subtract" => operator_subtract_block("x-var", "big-x-var", "outer-3"),
+              "x-var" => variable_reporter_block("x", "var-x", "inner-subtract"),
+              "big-x-var" => variable_reporter_block("X", "var-big-x", "inner-subtract")
+            },
+            "comments" => %{},
+            "costumes" => [],
+            "sounds" => []
+          }
+        ]
+      })
+
+    assert {:ok, sprite} =
+             Parser.enrich_target_from_archive(project_path, ".sb3", "Sprite1", "sprite")
+
+    reference_labels =
+      sprite
+      |> collect_reference_labels()
+      |> Enum.uniq()
+
+    assert "x - X" in reference_labels
+  end
+
   defp assert_detail_block_shape(block) do
     assert %{
              id: _,
@@ -661,4 +732,48 @@ defmodule ScratchInspector.ParserDetailBlocksTest do
     File.write!(path, zip_binary)
     path
   end
+
+  defp operator_subtract_block(left, right, parent) do
+    %{
+      "opcode" => "operator_subtract",
+      "next" => nil,
+      "parent" => parent,
+      "inputs" => %{"NUM1" => [1, left], "NUM2" => [1, right]},
+      "fields" => %{},
+      "shadow" => false,
+      "topLevel" => false
+    }
+  end
+
+  defp variable_reporter_block(name, id, parent) do
+    %{
+      "opcode" => "data_variable",
+      "next" => nil,
+      "parent" => parent,
+      "inputs" => %{},
+      "fields" => %{"VARIABLE" => [name, id]},
+      "shadow" => false,
+      "topLevel" => false
+    }
+  end
+
+  defp collect_reference_labels(value), do: collect_reference_labels(value, [])
+
+  defp collect_reference_labels(value, acc) when is_map(value) do
+    acc =
+      if Map.get(value, :reference, false) or Map.get(value, :kind) == :reference do
+        [Map.get(value, :label) | acc]
+      else
+        acc
+      end
+
+    value
+    |> Map.values()
+    |> Enum.reduce(acc, &collect_reference_labels(&1, &2))
+  end
+
+  defp collect_reference_labels(value, acc) when is_list(value),
+    do: Enum.reduce(value, acc, &collect_reference_labels(&1, &2))
+
+  defp collect_reference_labels(_value, acc), do: acc
 end

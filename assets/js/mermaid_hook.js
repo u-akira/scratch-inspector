@@ -47,9 +47,18 @@ export const MermaidHook = {
     this.handleNodeClick = this.handleNodeClick.bind(this)
     this.handleViewportScroll = this.positionInlineDetail.bind(this)
     this.handleWindowResize = this.positionInlineDetail.bind(this)
+    this.handleViewportPointerDown = this.handleViewportPointerDown.bind(this)
+    this.handleViewportPointerMove = this.handleViewportPointerMove.bind(this)
+    this.handleViewportPointerUp = this.handleViewportPointerUp.bind(this)
+    this.handleViewportClickCapture = this.handleViewportClickCapture.bind(this)
 
     this.el.addEventListener("click", this.handleZoomClick)
     this.viewport?.addEventListener("click", this.handleNodeClick)
+    this.viewport?.addEventListener("click", this.handleViewportClickCapture, true)
+    this.viewport?.addEventListener("pointerdown", this.handleViewportPointerDown)
+    this.viewport?.addEventListener("pointermove", this.handleViewportPointerMove)
+    this.viewport?.addEventListener("pointerup", this.handleViewportPointerUp)
+    this.viewport?.addEventListener("pointercancel", this.handleViewportPointerUp)
     this.viewport?.addEventListener("scroll", this.handleViewportScroll)
     window.addEventListener("resize", this.handleWindowResize)
     window.__mermaidLiveHook = this
@@ -80,6 +89,11 @@ export const MermaidHook = {
   destroyed() {
     this.el.removeEventListener("click", this.handleZoomClick)
     this.viewport?.removeEventListener("click", this.handleNodeClick)
+    this.viewport?.removeEventListener("click", this.handleViewportClickCapture, true)
+    this.viewport?.removeEventListener("pointerdown", this.handleViewportPointerDown)
+    this.viewport?.removeEventListener("pointermove", this.handleViewportPointerMove)
+    this.viewport?.removeEventListener("pointerup", this.handleViewportPointerUp)
+    this.viewport?.removeEventListener("pointercancel", this.handleViewportPointerUp)
     this.viewport?.removeEventListener("scroll", this.handleViewportScroll)
     window.removeEventListener("resize", this.handleWindowResize)
 
@@ -204,7 +218,71 @@ export const MermaidHook = {
     }
   },
 
+  handleViewportClickCapture(event) {
+    if (!this._suppressNextClick) return
+
+    this._suppressNextClick = false
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+  },
+
+  handleViewportPointerDown(event) {
+    if (!this.viewport || event.button !== 0 || event.ctrlKey || event.metaKey) return
+
+    const interactiveTarget = event.target.closest(
+      '[data-role="flow-inline-detail"], button, a, input, select, textarea, [role="button"]'
+    )
+    if (interactiveTarget) return
+
+    this._panGesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startScrollLeft: this.viewport.scrollLeft,
+      startScrollTop: this.viewport.scrollTop,
+      moved: false,
+      captured: false,
+    }
+  },
+
+  handleViewportPointerMove(event) {
+    if (!this.viewport || !this._panGesture) return
+    if (event.pointerId !== this._panGesture.pointerId) return
+
+    const dx = event.clientX - this._panGesture.startX
+    const dy = event.clientY - this._panGesture.startY
+    const moved = Math.abs(dx) > 3 || Math.abs(dy) > 3
+
+    if (!moved && !this._panGesture.moved) return
+
+    this._panGesture.moved = true
+    if (!this._panGesture.captured) {
+      this.viewport.setPointerCapture?.(event.pointerId)
+      this._panGesture.captured = true
+    }
+
+    this.viewport.classList.add("scratch-flow-viewport--panning")
+    this.viewport.scrollLeft = this._panGesture.startScrollLeft - dx
+    this.viewport.scrollTop = this._panGesture.startScrollTop - dy
+    event.preventDefault()
+  },
+
+  handleViewportPointerUp(event) {
+    if (!this.viewport || !this._panGesture) return
+    if (event.pointerId !== this._panGesture.pointerId) return
+
+    if (this._panGesture.captured) {
+      this.viewport.releasePointerCapture?.(event.pointerId)
+    }
+
+    this.viewport.classList.remove("scratch-flow-viewport--panning")
+    this._suppressNextClick = this._panGesture.moved
+    this._panGesture = null
+  },
+
   handleNodeClick(event) {
+    if (this._suppressNextClick) return
     if (!this.viewport) return
 
     let nodeId = null

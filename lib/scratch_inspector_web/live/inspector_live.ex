@@ -569,7 +569,10 @@ defmodule ScratchInspectorWeb.InspectorLive do
                 <span data-zoom-label class="text-xs font-medium text-slate-500">100%</span>
               </div>
 
-              <div data-role="viewport" class="relative min-h-[360px] overflow-auto px-2 py-4">
+              <div
+                data-role="viewport"
+                class="scratch-flow-viewport relative min-h-[360px] overflow-auto px-2 py-4"
+              >
                 <%= if @flow_detail do %>
                   <div
                     data-role="flow-inline-detail"

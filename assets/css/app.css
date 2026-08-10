@@ -16,6 +16,16 @@
   @apply flex-1 min-h-0 overflow-auto bg-gray-50 p-4 pr-12 pt-5;
 }
 
+.scratch-flow-viewport {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.scratch-flow-viewport--panning {
+  cursor: grabbing;
+}
+
 .costume-preview__image {
   display: block;
   width: 100%;
@@ -235,12 +245,15 @@
   margin-bottom: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0;
+  border: 0;
+  background-color: var(--c-block-accent, #ffab19);
+  box-shadow: none;
   font-size: 0.875rem;
   letter-spacing: 0;
 }
 
 .scratch-c-block-frame {
-  @apply -mt-px inline-flex w-max max-w-none flex-col items-start;
+  @apply -mt-[2px] inline-flex w-max max-w-none flex-col items-start;
 }
 
 .scratch-c-block-scope {
@@ -251,4 +264,5 @@
 
 .scratch-c-block-head-joined {
   @apply rounded-b-none border-b-0 pb-1;
+  box-shadow: none;
 }
