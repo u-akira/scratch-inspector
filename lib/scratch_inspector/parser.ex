@@ -216,6 +216,13 @@ defmodule ScratchInspector.Parser do
     end
   end
 
+  @doc "Scratch の project.json を直接解析する。URL経由のプロジェクト取得で使用する。"
+  def parse_json(json, opts \\ []) when is_binary(json) do
+    with {:ok, data} <- Jason.decode(json) do
+      {:ok, build_project(data, [], opts)}
+    end
+  end
+
   def parse(_path, ".sb") do
     {:error, "Scratch 1.x (.sb) 形式は現在未対応です"}
   end
@@ -233,6 +240,13 @@ defmodule ScratchInspector.Parser do
 
   def enrich_project_costume_images_from_archive(_project, _path, ext) do
     {:error, "unsupported extension for costume enrich: #{ext}"}
+  end
+
+  @doc "URL経由で取得したアセットをコスチューム・サウンドへ埋め込む。"
+  def enrich_project_assets(project, files) when is_map(project) and is_list(files) do
+    stage = enrich_target_assets(project.stage, files)
+    sprites = Enum.map(project.sprites || [], &enrich_target_assets(&1, files))
+    %{project | stage: stage, sprites: sprites}
   end
 
   def enrich_target_from_archive(path, ext, name, type) when ext in [".sb2", ".sb3"] do
@@ -359,7 +373,7 @@ defmodule ScratchInspector.Parser do
 
   # ---- project building ----
 
-  defp build_project(data, zip_files) do
+  defp build_project(data, zip_files, opts \\ []) do
     t0 = System.monotonic_time(:millisecond)
     Logger.info("[parser] build_project start")
 
@@ -379,7 +393,7 @@ defmodule ScratchInspector.Parser do
       if stage_target do
         t_stage = System.monotonic_time(:millisecond)
         Logger.info("[parser] build_project stage start")
-        result = build_sprite(Map.put(stage_target, "name", "Stage"), zip_files, true)
+        result = build_sprite(Map.put(stage_target, "name", "Stage"), zip_files, true, opts)
 
         Logger.info(
           "[parser] build_project stage done elapsed_ms=#{System.monotonic_time(:millisecond) - t_stage}"
@@ -389,7 +403,7 @@ defmodule ScratchInspector.Parser do
       end
 
     t_sprites = System.monotonic_time(:millisecond)
-    sprites = Enum.map(sprite_targets, &build_sprite(&1, zip_files, false))
+    sprites = Enum.map(sprite_targets, &build_sprite(&1, zip_files, false, opts))
 
     Logger.info(
       "[parser] build_project sprites elapsed_ms=#{System.monotonic_time(:millisecond) - t_sprites} count=#{length(sprites)}"
@@ -441,7 +455,30 @@ defmodule ScratchInspector.Parser do
     Map.put(target, :costumes, costumes)
   end
 
-  defp build_sprite(target, zip_files, is_stage, opts \\ []) do
+  defp enrich_target_assets(nil, _files), do: nil
+
+  defp enrich_target_assets(target, files) do
+    target
+    |> enrich_target_costumes(files)
+    |> enrich_target_sounds(files)
+  end
+
+  defp enrich_target_sounds(target, files) do
+    sounds =
+      Enum.map(target.sounds || [], fn sound ->
+        case find_file_data(files, Map.get(sound, :asset_file)) do
+          {:ok, binary} when byte_size(binary) <= @sound_inline_limit_bytes ->
+            Map.put(sound, :base64, Base.encode64(binary))
+
+          _ ->
+            sound
+        end
+      end)
+
+    Map.put(target, :sounds, sounds)
+  end
+
+  defp build_sprite(target, zip_files, is_stage, opts) do
     t0 = System.monotonic_time(:millisecond)
     name = Map.get(target, "name", "Unknown")
     blocks = Map.get(target, "blocks", %{})
@@ -1202,11 +1239,11 @@ defmodule ScratchInspector.Parser do
   end
 
   defp command_opcode?(opcode) do
-      opcode in [
-        "sensing_askandwait",
-        "sensing_resettimer",
-        "sensing_setdragmode"
-      ]
+    opcode in [
+      "sensing_askandwait",
+      "sensing_resettimer",
+      "sensing_setdragmode"
+    ]
   end
 
   defp block_category(opcode) do

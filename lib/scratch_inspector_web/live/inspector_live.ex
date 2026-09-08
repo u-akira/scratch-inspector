@@ -53,6 +53,16 @@ defmodule ScratchInspectorWeb.InspectorLive do
   end
 
   @impl true
+  def handle_info({:url_parse_finished, {:ok, project, name}}, socket) do
+    {:noreply, ScratchInspectorWeb.Live.InspectorUpload.finish(socket, {:ok, project}, name, nil)}
+  end
+
+  @impl true
+  def handle_info({:url_parse_finished, {:error, reason}}, socket) do
+    {:noreply, socket |> assign(:upload_error, reason) |> assign(:processing, false)}
+  end
+
+  @impl true
   def handle_info({:costume_assets_enriched, {:ok, enriched_project}}, socket) do
     Logger.info("[assets] async costume enrich finished")
 
@@ -324,6 +334,26 @@ defmodule ScratchInspectorWeb.InspectorLive do
                 </p>
               <% end %>
             </form>
+
+            <div class="my-5 flex items-center gap-3 text-xs text-gray-400">
+              <span class="h-px flex-1 bg-gray-200"></span><span>または</span><span class="h-px flex-1 bg-gray-200"></span>
+            </div>
+
+            <form id="project-url-form" phx-submit="load_url" class="flex gap-2">
+              <input
+                name="project_url"
+                type="url"
+                required
+                placeholder="ScratchプロジェクトのURL"
+                class="min-w-0 flex-1 rounded-full border border-gray-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-[#4C97FF]"
+              />
+              <button
+                type="submit"
+                class="shrink-0 rounded-full bg-gray-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-600"
+              >
+                URLから解析
+              </button>
+            </form>
           </div>
         </div>
         
@@ -336,7 +366,7 @@ defmodule ScratchInspectorWeb.InspectorLive do
               <span>解析中です。完了までしばらくお待ちください…</span>
             </div>
           <% end %>
-
+          
     <!-- Sprite thumbnail strip -->
           <div class="bg-white border-b border-gray-200 flex gap-1 px-3 py-2 overflow-x-auto flex-shrink-0">
             <%= if @project.stage do %>

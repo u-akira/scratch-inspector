@@ -70,26 +70,28 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
     end
   end
 
-  def finish(socket, parse_result, name, temp_path) do
+  def finish(socket, parse_result, name, temp_path, ext_override \\ nil) do
     case parse_result do
       {:ok, project} ->
         parent = self()
-        ext = Path.extname(name) |> String.downcase()
+        ext = ext_override || Path.extname(name) |> String.downcase()
 
-        Task.start(fn ->
-          enrich_result =
-            try do
-              ScratchInspector.Parser.enrich_project_costume_images_from_archive(
-                project,
-                temp_path,
-                ext
-              )
-            rescue
-              e -> {:error, Exception.message(e)}
-            end
+        if is_binary(temp_path) and ext in [".sb2", ".sb3"] do
+          Task.start(fn ->
+            enrich_result =
+              try do
+                ScratchInspector.Parser.enrich_project_costume_images_from_archive(
+                  project,
+                  temp_path,
+                  ext
+                )
+              rescue
+                e -> {:error, Exception.message(e)}
+              end
 
-          send(parent, {:costume_assets_enriched, enrich_result})
-        end)
+            send(parent, {:costume_assets_enriched, enrich_result})
+          end)
+        end
 
         Logger.info(
           "[upload] parse success name=#{name} stage=#{not is_nil(project.stage)} sprites=#{length(project.sprites)} vars=#{length(project.variables)}"
@@ -100,7 +102,7 @@ defmodule ScratchInspectorWeb.Live.InspectorUpload do
         |> assign(:selected_sprite, if(project.stage, do: project.stage.name, else: nil))
         |> assign(:selected_target_type, if(project.stage, do: "stage", else: nil))
         |> assign(:uploaded_archive_path, temp_path)
-        |> assign(:uploaded_archive_ext, ext)
+        |> assign(:uploaded_archive_ext, if(is_binary(temp_path), do: ext, else: nil))
         |> assign(:deferred_target, nil)
         |> assign(:analysis_errors, %{})
         |> assign(:upload_error, nil)

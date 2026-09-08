@@ -1,6 +1,7 @@
 defmodule ScratchInspectorWeb.Live.InspectorEvents do
   alias ScratchInspectorWeb.Live.DeferredTargetCompactor
   alias ScratchInspectorWeb.Live.InspectorUpload
+  alias ScratchInspectorWeb.Live.InspectorURL
   require Logger
   @deferred_enrich_timeout_ms 20_000
 
@@ -9,6 +10,8 @@ defmodule ScratchInspectorWeb.Live.InspectorEvents do
   end
 
   def handle("upload", _params, socket), do: InspectorUpload.process(socket)
+
+  def handle("load_url", %{"project_url" => url}, socket), do: InspectorURL.process(socket, url)
 
   def handle("select_sprite", %{"name" => name, "type" => type}, socket) do
     {:noreply,
