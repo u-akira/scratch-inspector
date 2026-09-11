@@ -28,6 +28,54 @@ Scratch プロジェクトファイルをアップロードすると、以下の
 - **言語 / フレームワーク**: Elixir + Phoenix LiveView
 - **対象ファイル形式**: `.sb`（Scratch 1.x）、`.sb2`（Scratch 2.x）、`.sb3`（Scratch 3.x）
 
+## Render へのデプロイ
+
+Render のネイティブ Elixir ランタイムを使い、Phoenix の Mix Release としてデプロイする。Dockerfile は不要。この手順は DB を使わない現在の構成を前提としている。
+
+### 事前準備
+
+1. このリポジトリを GitHub などの Git プロバイダに push する。
+2. Render Dashboard で **New > Web Service** を選び、リポジトリを接続する。
+3. サービス作成画面で、次の値を設定する。
+
+| 項目 | 値 |
+| --- | --- |
+| Language | `Elixir` |
+| Build Command | `npm ci --prefix assets && mix deps.get --only prod && MIX_ENV=prod mix compile && MIX_ENV=prod mix assets.deploy && MIX_ENV=prod mix phx.gen.release && MIX_ENV=prod mix release` |
+| Start Command | `_build/prod/rel/scratch_inspector/bin/server` |
+
+`npm ci --prefix assets` は `assets/package-lock.json` に従って Mermaid などの JavaScript 依存関係をインストールする。`mix phx.gen.release` で `bin/server` ランチャーを生成した後、`mix release` で production release を assemble する。`mix assets.deploy` は本番用アセットと digest を生成する。
+
+### 環境変数
+
+Render のサービス設定画面の **Environment** に、次を追加する。
+
+| キー | 値 |
+| --- | --- |
+| `SECRET_KEY_BASE` | ローカルで `mix phx.gen.secret` を実行して得られる 64 bytes 以上の値 |
+| `PORT` | `10000` |
+| `PHX_HOST` | Render が表示する `<サービス名>.onrender.com` のホスト名（`https://` は付けない） |
+
+`SECRET_KEY_BASE` はリポジトリへ commit しない。必ずローカルで `mix phx.gen.secret` を実行して得た出力を、そのまま Render に貼り付ける。Render の Elixir サービスでは `MIX_ENV=prod` が自動設定されるため、通常は追加設定不要。Elixir/OTP のバージョンを固定する場合は、`mix.exs` の制約（Elixir `~> 1.14`）に合う `ELIXIR_VERSION` と `ERLANG_VERSION` も設定する。
+
+### デプロイと確認
+
+1. **Create Web Service** をクリックする。
+2. **Deploys** のログで release の生成と起動処理が成功することを確認する。
+3. デプロイ完了後、Render が表示する URL をブラウザで開き、Scratch ファイルをアップロードする。
+
+Render の Web Service は `0.0.0.0` の `PORT` で待ち受ける必要がある。このアプリは `config/runtime.exs` で `PORT` を読み取る。LiveView の WebSocket 接続を含むため、Static Site ではなく Web Service を選ぶこと。初回デプロイでポート検出に失敗する場合は、同ファイルの `http` 設定にある `ip` を `{0, 0, 0, 0}`（IPv4 any）へ変更して再デプロイする。
+
+### 更新時
+
+接続したブランチへ push すると、Render が自動デプロイする。失敗時は Render の **Logs** と **Deploys** で、特に以下を確認する。
+
+- `SECRET_KEY_BASE is missing` が出ていないか
+- `npm ci --prefix assets`、`assets.deploy`、`phx.gen.release`、`mix release` が完了しているか
+- `PORT` と `PHX_HOST` の値に余計な引用符や `https://` が入っていないか
+
+詳しい仕様は [Render の Phoenix デプロイガイド](https://render.com/docs/deploy-phoenix)、[Web Services のポート設定](https://render.com/docs/web-services)、[Elixir/OTP バージョン設定](https://render.com/docs/elixir-erlang-versions) を参照。
+
 ## 主要機能
 
 ### ファイル読み込み
