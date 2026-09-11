@@ -8,6 +8,11 @@ defmodule ScratchInspector.MixProject do
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
+      releases: [
+        scratch_inspector: [
+          applications: [inets: :permanent, ssl: :permanent, public_key: :permanent]
+        ]
+      ],
       aliases: aliases(),
       deps: deps()
     ]
